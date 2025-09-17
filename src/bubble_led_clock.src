@@ -1,0 +1,2434 @@
+--- BEGIN FILE: bubble_led_clock/tz_data.h ---
+#ifndef TZ_DATA_H
+#define TZ_DATA_H
+
+#include "blc_types.h"
+
+extern const PrefSelectOption timezones[];
+extern const int num_timezones;
+
+#endif // TZ_DATA_H
+--- END FILE: bubble_led_clock/tz_data.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/debug.h ---
+#ifndef DEBUG_H
+#define DEBUG_H
+
+#include "Arduino.h"
+#include "blc_app.h" // Needed to access the preferences singleton
+
+extern SemaphoreHandle_t serialMutex;
+
+#define LOGMSG(level, format, ...) \
+    do { \
+        /* Only print if the configured level is high enough for this message */ \
+        if (BubbleLedClockApp::getInstance().getPrefs().config.logLevel >= level) { \
+            if (serialMutex != NULL && xSemaphoreTake(serialMutex, portMAX_DELAY) == pdTRUE) { \
+                Serial.printf(format "\n", ##__VA_ARGS__); \
+                xSemaphoreGive(serialMutex); \
+            } \
+        } \
+    } while (0)
+
+#define LOGERR(format, ...) LOGMSG(APP_LOG_ERROR, format, ##__VA_ARGS__)
+#define LOGINF(format, ...)  LOGMSG(APP_LOG_INFO,  format, ##__VA_ARGS__)
+#define LOGDBG(format, ...) LOGMSG(APP_LOG_DEBUG, format, ##__VA_ARGS__)
+
+/*
+#ifdef ESP32DEBUGGING
+ #define DBGLOG(format, ...) \
+    do { \
+        if (serialMutex != NULL && xSemaphoreTake(serialMutex, portMAX_DELAY) == pdTRUE) { \
+            Serial.printf(format "\n", ##__VA_ARGS__); \
+            xSemaphoreGive(serialMutex); \
+        } \
+    } while (0)
+#else
+  #define DBGLOG(format, ...)
+#endif
+*/
+
+#endif // DEBUG_H
+--- END FILE: bubble_led_clock/debug.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_fsm_manager.h ---
+#ifndef BLC_FSM_MANAGER_H
+#define BLC_FSM_MANAGER_H
+
+#include "SimpleFSM.h"
+
+class BubbleLedClockApp;
+
+class BlcFsmManager {
+public:
+    BlcFsmManager(BubbleLedClockApp& app);
+
+    void setup();
+    void update(); 
+
+    bool isInState(const String& stateName) const; 
+
+    void on_enter_wifi_connect();
+    void on_enter_ntp_sync();
+    void on_exit_ntp_sync();
+    void on_enter_ap_mode();
+    void on_exit_ap_mode();
+    void on_enter_running_normal();
+
+    bool guard_wifi_connected();
+    bool guard_wifi_timed_out();
+    bool guard_ntp_success();
+    bool guard_ntp_timeout_with_rtc();
+    bool guard_ntp_timeout_no_rtc();
+    bool guard_ap_timeout_with_rtc();
+
+private:
+    BubbleLedClockApp& _app; 
+    SimpleFSM _fsm;
+};
+
+#endif // BLC_FSM_MANAGER_H
+--- END FILE: bubble_led_clock/blc_fsm_manager.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/wifi_connector.cpp ---
+#include "debug.h"
+#include "blc_app.h"
+#include "blc_preferences.h"
+#include "wifi_connector.h"
+
+#include <ESPping.h>
+#include "Arduino.h"
+
+
+bool WiFiConnect(const char *host, const char *ssid, const char *pass,
+                 const int attempts) {
+  delay(10);
+
+  LOGMSG(APP_LOG_DEBUG, "------------");
+  LOGMSG(APP_LOG_DEBUG, "Connecting to %s", ssid);
+
+  WiFi.setHostname(host);
+  wl_status_t stat = WiFi.begin(ssid, pass);
+  LOGMSG(APP_LOG_DEBUG, "WiFi Status: %d", stat);
+
+  unsigned waitCnt = 0;
+  while (WiFi.status() != WL_CONNECTED) {
+    // delay(500);  // ToDo: play melody instead
+    // playMelody(GPIO_BUZZER, MELODY_WIFI_CONNECTED);
+    // LOGMSG(APP_LOG_DEBUG, ".");
+    waitCnt++;
+    if (waitCnt > attempts) {
+      LOGMSG(APP_LOG_DEBUG, "Connection timed out");
+      return false;
+    }
+  }
+
+  IPAddress ip = WiFi.localIP();
+
+  LOGMSG(APP_LOG_DEBUG, "WiFi connected");
+  LOGMSG(APP_LOG_DEBUG, "IP address: %s", ip.toString().c_str());
+
+  return true;
+}
+
+--- END FILE: bubble_led_clock/wifi_connector.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/display_manager.cpp ---
+#include "display_manager.h"
+
+DisplayManager::DisplayManager(IDisplayDriver& display) : _display(display) {}
+
+void DisplayManager::begin() {
+    _display.begin();
+    _display.setBrightness(5);
+}
+
+void DisplayManager::setAnimation(std::unique_ptr<IAnimation> animation) {
+    _currentAnimation = std::move(animation);
+    if (_currentAnimation) {
+        _currentAnimation->setup(&_display);
+    }
+}
+
+void DisplayManager::update() {
+    if (_currentAnimation) {
+        _currentAnimation->update();
+        if (_currentAnimation->isDone()) {
+            _currentAnimation.reset(); // Clear the animation
+            _display.clear();
+            _display.writeDisplay();            
+        }
+    }
+}
+
+bool DisplayManager::isAnimationRunning() const {
+    // The animation is running if the unique_ptr is not null
+    return _currentAnimation != nullptr;
+}
+
+
+--- END FILE: bubble_led_clock/display_manager.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_preferences.h ---
+#ifndef BLC_PREFERENCES_H
+#define BLC_PREFERENCES_H
+
+#include "blc_access_point.h"
+
+#include <Arduino.h>
+#include <IPAddress.h>
+#include <Preferences.h>
+
+#define PING_IP_COUNT 4
+#define MAX_PREF_STRING_LEN 64
+
+struct AppConfig {
+  char ssid[MAX_PREF_STRING_LEN];
+  char password[MAX_PREF_STRING_LEN];
+  char time_zone[MAX_PREF_STRING_LEN];
+  AppLogLevel logLevel;
+  char owm_api_key[MAX_PREF_STRING_LEN];
+  char owm_city[MAX_PREF_STRING_LEN];
+  char owm_state_code[MAX_PREF_STRING_LEN];
+  char owm_country_code[MAX_PREF_STRING_LEN];
+};
+
+class AppPreferences {
+protected:
+  Preferences prefs;
+
+public:
+  AppConfig config;
+
+  void setup();
+  void getPreferences();
+  void putPreferences();
+  void dumpPreferences();
+};
+
+// extern AppPreferences appPrefs;
+
+#endif // BLC_PREFERENCES_H
+
+--- END FILE: bubble_led_clock/blc_preferences.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_access_point.h ---
+#ifndef BLC_ACCESS_POINT_H
+#define BLC_ACCESS_POINT_H
+
+#include "blc_types.h"
+
+#include <Arduino.h>
+#include <cstdint>
+
+#define DNS_SERVER_PORT 53
+
+enum FormFieldIndex {
+  WIFI_SSID,
+  PASSWORD,
+  TIME_ZONE,
+  LOG_LEVEL,
+  OWM_CITY,
+  OWM_STATE_CODE,
+  OWM_COUNTRY_CODE,
+  OWM_API_KEY,
+  NUM_FORM_FIELDS
+};
+
+enum PrefType { 
+  PREF_NONE, 
+  PREF_STRING, 
+  PREF_BOOL, 
+  PREF_INT, 
+  PREF_ENUM,
+  PREF_SELECT
+};
+
+
+enum FieldValidation {
+  VALIDATION_NONE,
+  VALIDATION_IP_ADDRESS,
+  VALIDATION_INTEGER,
+  // VALIDATION_ENUM
+};
+
+enum AppLogLevel {
+  APP_LOG_ERROR, // 0
+  APP_LOG_INFO,  // 1
+  APP_LOG_DEBUG  // 3
+};
+
+typedef struct {
+  const char *id;             // HTML element ID
+  const char *name;           // HTML element name (optional)
+  bool isMasked;              // Password needs to be masked
+  FieldValidation validation; // what kind of validation needs to be performed
+  PrefType prefType;
+  union {
+    char *str_pref;
+    bool *bool_pref;
+    int32_t *int_pref;
+    AppLogLevel *enum_pref;
+  } pref;
+  String value;  // Current value
+  bool received; // Flag indicating if a value was received
+
+  const PrefSelectOption* select_options; // Pointer to an array of options
+  int num_select_options;                 // The number of options in the array
+
+  void setValue(const String &newValue) { value = newValue; }
+} FormField;
+
+void processAPInput();
+void setupAP(const char *hostName);
+void loopAP(unsigned long apRebootTimeMillis);
+
+#endif // ACCESS_POINT
+
+--- END FILE: bubble_led_clock/blc_access_point.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/anim_matrix.cpp ---
+#include <Arduino.h>
+#include "anim_matrix.h"
+
+#define SEG_A 0b00000001
+#define SEG_B 0b00000010
+#define SEG_C 0b00000100
+#define SEG_D 0b00001000
+#define SEG_E 0b00010000
+#define SEG_F 0b00100000
+#define SEG_G 0b01000000
+
+MatrixAnimation::MatrixAnimation(std::string targetText, unsigned long revealDelay, unsigned long holdTime, unsigned long rainDelay, bool dotsWithPreviousChar)
+    : _targetText(targetText),
+      _dotsWithPreviousChar(dotsWithPreviousChar),
+      _revealDelay(revealDelay),
+      _holdTime(holdTime),
+      _rainDelay(rainDelay),
+      _lastRainTime(0),
+      _lastRevealTime(0),
+      _revealCompleteTime(0),
+      _revealedCount(0) {}
+
+void MatrixAnimation::setup(IDisplayDriver* display) {
+    IAnimation::setup(display);
+    int size = _display->getDisplaySize();
+
+    // --- Pre-parse the target string to handle dots ---
+    _parsedTargetText = "";
+    _dotState.assign(size, false);
+    
+    int text_idx = 0;
+    int display_idx = 0;
+    while (text_idx < _targetText.length() && display_idx < size) {
+        char currentChar = _targetText[text_idx];
+        if (currentChar == '.' && _dotsWithPreviousChar) {
+            if (display_idx > 0) {
+                _dotState[display_idx - 1] = true;
+            }
+            text_idx++;
+            continue;
+        }
+        _parsedTargetText += currentChar;
+        text_idx++;
+        display_idx++;
+    }
+    // Pad with spaces if needed
+    while (_parsedTargetText.length() < size) {
+        _parsedTargetText += ' ';
+    }
+
+    // Initialize rain positions
+    _rainPos.resize(size, std::vector<float>(3, 0.0f));
+    for (int i = 0; i < size; ++i) {
+        _rainPos[i][0] = random(0, 20) / 10.0f;
+        _rainPos[i][1] = random(0, 30) / 10.0f;
+        _rainPos[i][2] = random(0, 20) / 10.0f;
+    }
+}
+
+bool MatrixAnimation::isDone() {
+    bool revealComplete = _revealedCount >= _display->getDisplaySize();
+    if (!revealComplete) {
+        return false;
+    }
+    return (millis() - _revealCompleteTime >= _holdTime);
+}
+
+void MatrixAnimation::update() {
+    unsigned long currentTime = millis();
+    if (currentTime - _lastRainTime < _rainDelay) {
+        return; // Control frame rate
+    }
+    _lastRainTime = currentTime;
+
+    if (isDone()) {
+        return;
+    }
+
+    int displaySize = _display->getDisplaySize();
+
+    // --- Reveal Logic: Reveal one character at a time ---
+    bool revealPhaseActive = _revealedCount < displaySize;
+    if (revealPhaseActive && (currentTime - _lastRevealTime >= _revealDelay)) {
+        _lastRevealTime = currentTime;
+        _revealedCount++;
+        if (_revealedCount == displaySize) {
+            _revealCompleteTime = millis();
+        }
+    }
+
+    _display->clear();
+    for (int i = 0; i < displaySize; ++i) {
+        if (i < _revealedCount) {
+            // This character is revealed, show it from the parsed text
+            _display->setChar(i, _parsedTargetText[i], _dotState[i]);
+        } else {
+            // This character is not yet revealed, show rain animation
+            uint8_t fallingMask = 0;
+            _rainPos[i][0] += 0.1f;
+            if (_rainPos[i][0] >= 2.0f) _rainPos[i][0] -= 2.0f;
+            if ((int)_rainPos[i][0] == 0) fallingMask |= SEG_F; else fallingMask |= SEG_E;
+
+            _rainPos[i][1] += 0.08f;
+            if (_rainPos[i][1] >= 3.0f) _rainPos[i][1] -= 3.0f;
+            if ((int)_rainPos[i][1] == 0) fallingMask |= SEG_A;
+            else if ((int)_rainPos[i][1] == 1) fallingMask |= SEG_G; else fallingMask |= SEG_D;
+
+            _rainPos[i][2] += 0.12f;
+            if (_rainPos[i][2] >= 2.0f) _rainPos[i][2] -= 2.0f;
+            if ((int)_rainPos[i][2] == 0) fallingMask |= SEG_B; else fallingMask |= SEG_C;
+            
+            _display->setSegments(i, fallingMask);
+        }
+    }
+    _display->writeDisplay();
+}
+
+
+--- END FILE: bubble_led_clock/anim_matrix.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_preferences.cpp ---
+// #define DBGLOGENABLED
+#include "debug.h"
+#include "blc_preferences.h"
+
+#include <Preferences.h>
+#include <Arduino.h>
+#include <string.h>
+
+#define APP_PREF_WIFI_SSID "wifi_ssid"
+#define APP_PREF_PASSWORD "password"
+#define APP_PREF_TIME_ZONE "time_zone"
+#define APP_PREF_LOG_LEVEL "log_level"
+#define APP_PREF_OWM_API_KEY "owm_api_key"
+#define APP_PREF_OWM_CITY    "owm_city"
+#define APP_PREF_OWM_STATE_CODE "owm_state"
+#define APP_PREF_OWM_COUNTRY_CODE "owm_country"
+
+// AppPreferences appPrefs{};
+
+void AppPreferences::setup() {
+  prefs.begin("config");
+  getPreferences();
+}
+
+void AppPreferences::getPreferences() {
+  prefs.getString(APP_PREF_WIFI_SSID, config.ssid, sizeof(config.ssid));
+
+  prefs.getString(APP_PREF_PASSWORD, config.password, sizeof(config.password));
+
+  if (prefs.isKey(APP_PREF_TIME_ZONE)) {
+    prefs.getString(APP_PREF_TIME_ZONE, config.time_zone, sizeof(config.time_zone));
+  } else {
+    strncpy(config.time_zone, "EST5EDT,M3.2.0,M11.1.0", sizeof(config.time_zone));
+  }
+  prefs.getString(APP_PREF_OWM_API_KEY, config.owm_api_key, sizeof(config.owm_api_key));
+
+  if (prefs.isKey(APP_PREF_OWM_CITY)) {
+    prefs.getString(APP_PREF_OWM_CITY, config.owm_city, sizeof(config.owm_city));
+  } else {
+    strncpy(config.owm_city, "New York", sizeof(config.owm_city));
+  }  
+  
+  if (prefs.isKey(APP_PREF_OWM_STATE_CODE)) {
+    prefs.getString(APP_PREF_OWM_STATE_CODE, config.owm_state_code, sizeof(config.owm_state_code));
+  } else {
+    strncpy(config.owm_state_code, "NY", sizeof(config.owm_state_code));
+  }
+  
+  if (prefs.isKey(APP_PREF_OWM_COUNTRY_CODE)) {
+    prefs.getString(APP_PREF_OWM_COUNTRY_CODE, config.owm_country_code, sizeof(config.owm_country_code));
+  } else {
+    strncpy(config.owm_country_code, "US", sizeof(config.owm_country_code));
+  }
+  
+  int32_t savedLogLevel = prefs.getInt(APP_PREF_LOG_LEVEL, APP_LOG_INFO);
+  config.logLevel = static_cast<AppLogLevel>(savedLogLevel);
+  if (config.logLevel < APP_LOG_ERROR)
+    config.logLevel = APP_LOG_ERROR;
+  else if (config.logLevel > APP_LOG_DEBUG)
+    config.logLevel = APP_LOG_DEBUG;
+}
+
+void AppPreferences::putPreferences() {
+  prefs.putString(APP_PREF_WIFI_SSID, config.ssid);
+  prefs.putString(APP_PREF_PASSWORD, config.password);
+  prefs.putString(APP_PREF_TIME_ZONE, config.time_zone);
+  prefs.putInt(APP_PREF_LOG_LEVEL, config.logLevel);
+  prefs.putString(APP_PREF_OWM_API_KEY, config.owm_api_key);
+  prefs.putString(APP_PREF_OWM_CITY, config.owm_city);
+  prefs.putString(APP_PREF_OWM_STATE_CODE, config.owm_state_code);
+  prefs.putString(APP_PREF_OWM_COUNTRY_CODE, config.owm_country_code);
+}
+
+void AppPreferences::dumpPreferences() {
+  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_WIFI_SSID, config.ssid);
+  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_PASSWORD, "***");
+  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_TIME_ZONE, config.time_zone);
+  LOGMSG(APP_LOG_DEBUG, "%s: %d", APP_PREF_LOG_LEVEL, config.logLevel);
+  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_OWM_CITY, config.owm_city);
+  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_OWM_STATE_CODE, config.owm_state_code);
+  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_OWM_COUNTRY_CODE, config.owm_country_code);
+  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_OWM_API_KEY, "***"); 
+}
+
+--- END FILE: bubble_led_clock/blc_preferences.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_types.h ---
+#ifndef BLC_TYPES_H
+#define BLC_TYPES_H
+
+// --- Shared Animation & Scene Types ---
+enum AnimationType {
+  SLOT_MACHINE,
+  MATRIX
+};
+
+struct DisplayScene {
+  const char* format_string;
+  AnimationType animation_type;
+  bool dots_with_previous;
+  unsigned long duration_ms;
+  unsigned long anim_param_1;
+  unsigned long anim_param_2;
+  float (*getDataValue)(); 
+};
+
+// --- Shared Access Point Form Types ---
+// A generic struct to hold the text and value for a dropdown option
+struct PrefSelectOption {
+  const char* name;  // The user-friendly text (e.g., "Eastern Time")
+  const char* value; // The value to save (e.g., "EST5EDT,M3.2.0...")
+};
+
+#endif // BLC_TYPES_H
+
+--- END FILE: bubble_led_clock/blc_types.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_app.cpp ---
+#include "blc_app.h"
+#include "debug.h"
+#include "version.h"             
+#include "anim_scrolling_text.h" 
+
+#define AP_MODE_LONG_PRESS_DURATION 3000 // 3 seconds
+
+// --- Constructor with Member Initializer List ---
+BubbleLedClockApp::BubbleLedClockApp() :
+    _display(0x70, 8),
+    _displayManager(_display),
+    _rtc(),
+    _appPrefs()
+{
+    _rtcActive = false;
+}
+ 
+// In file: blc_app.cpp
+
+void BubbleLedClockApp::setup() {
+    _appPrefs.setup();
+    _appPrefs.getPreferences();
+    _displayManager.begin();
+    
+    LOGMSG(APP_LOG_INFO, "BubbleLedClockApp::setup()");
+
+    Preferences ap_prefs;
+    ap_prefs.begin("ap_mode_check", false);
+    
+    bool force_ap = ap_prefs.getBool("force_ap", false);
+
+    if (force_ap) {
+        // --- Double Reset Path ---
+        // A recent reboot was detected. Clear the flag and enter AP mode.
+        LOGMSG(APP_LOG_INFO, "Double reset detected. Forcing AP mode.");
+        ap_prefs.putBool("force_ap", false);
+        ap_prefs.end();
+
+        setupAP(AP_HOST_NAME);
+        String apMsgStr = "AP MODE -- CONNECT TO ";
+        apMsgStr += AP_HOST_NAME;
+        auto apMessage = std::make_unique<ScrollingTextAnimation>(apMsgStr.c_str());
+        _displayManager.setAnimation(std::move(apMessage));
+
+        // This blocking loop runs the Access Point until the device is rebooted.
+        while (true) {
+            getDisplay().print("AP MODE");  
+            _displayManager.update();
+            processAPInput();
+            delay(10);
+        }
+
+    } else {
+        // --- Normal Boot Path ---
+        // Set the flag to true for the 3-second window.
+        ap_prefs.putBool("force_ap", true);
+        ap_prefs.end();
+        delay(3000); // 3-second window for the user to perform a reset
+
+        // If we get here, it was a normal boot. Clear the flag and continue.
+        // This is the crucial change: this code now runs *inside* the else block.
+        ap_prefs.putBool("force_ap", false);
+        ap_prefs.end();
+    }
+    
+    // --- Normal startup sequence continues from here ---
+    std::string message = std::string(APP_NAME) + " v" + VERSION_STRING + 
+                          " by " + std::string(APP_AUTHOR) + 
+                          " (" + std::string(APP_DATE) + "). " +
+                          std::string(APP_MESSAGE);
+
+    auto startupMsg = std::make_unique<ScrollingTextAnimation>(message);
+    _displayManager.setAnimation(std::move(startupMsg));
+    
+    while (_displayManager.isAnimationRunning()) {
+        _displayManager.update();
+        delay(10);
+    }
+
+    if (!_rtc.begin()) {
+        LOGMSG(APP_LOG_ERROR, "Couldn't find RTC module!");
+        _rtcActive = false;
+    } else {
+        LOGMSG(APP_LOG_INFO, "RTC module found.");
+        _rtcActive = true;
+    }
+    
+    _fsmManager = std::make_unique<BlcFsmManager>(*this);
+    _sceneManager = std::make_unique<SceneManager>(*this);
+    _fsmManager->setup();
+    _sceneManager->setup();
+    
+    LOGMSG(APP_LOG_INFO, "--- SETUP COMPLETE ---");
+}
+
+void BubbleLedClockApp::loop() {
+
+    // Tell the managers to do their work
+    _fsmManager->update();
+    _sceneManager->update();
+    _displayManager.update();
+}
+
+float BubbleLedClockApp::getTempData() { return _currentWeatherData.temperatureF; }
+float BubbleLedClockApp::getHumidityData() { return _currentWeatherData.humidity; }
+
+void BubbleLedClockApp::formatTime(char *txt, unsigned txt_size, const char *format, time_t now) {
+    struct tm timeinfo = *localtime(&now);
+    strftime(txt, txt_size, format, &timeinfo);
+    if (txt[0] == '0') {
+        txt[0] = ' ';
+    }
+}
+--- END FILE: bubble_led_clock/blc_app.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_app.h ---
+#ifndef BLC_APP_H
+#define BLC_APP_H
+
+#include <memory>
+#include "blc_types.h"
+#include "blc_scene_manager.h"
+#include "blc_preferences.h"
+#include "blc_fsm_manager.h"
+
+#include "disp_driver_ht16k33.h"
+#include "display_manager.h"
+#include "openweather_client.h"
+#include "RTClib.h"
+
+#define AP_HOST_NAME "bubble-clock"
+
+class BubbleLedClockApp {
+public:
+    static BubbleLedClockApp& getInstance() {
+        static BubbleLedClockApp instance;
+        return instance;
+    }
+    
+    void setup();
+    void loop();
+
+    // --- Public Accessors for Managers and Components ---
+    AppPreferences& getPrefs() { return _appPrefs; }
+    DisplayManager& getClock() { return _displayManager; }
+    IDisplayDriver& getDisplay() { return _display; }
+    RTC_DS1307& getRtc() { return _rtc; }
+    BlcFsmManager& getFsmManager() { return *_fsmManager; }
+    SceneManager& getSceneManager() { return *_sceneManager; }
+    bool isRtcActive() const { return _rtcActive; }
+    
+    // Public data accessors used by the scene playlist
+    float getTempData();
+    float getHumidityData();
+    void setWeatherData(const OpenWeatherData& data) { _currentWeatherData = data; }
+    void formatTime(char *txt, unsigned txt_size, const char *format, time_t now);
+
+private:
+    BubbleLedClockApp();
+
+    // Core hardware components
+    DispDriverHT16K33 _display;
+    DisplayManager _displayManager;
+    RTC_DS1307 _rtc;
+    AppPreferences _appPrefs;
+    bool _rtcActive;
+
+    // Manager classes
+    std::unique_ptr<BlcFsmManager> _fsmManager;
+    std::unique_ptr<SceneManager> _sceneManager;
+    
+    // App-level state data
+    OpenWeatherData _currentWeatherData;
+};
+
+#endif // BLC_APP_H
+--- END FILE: bubble_led_clock/blc_app.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/anim_scrolling_text.h ---
+#ifndef ANIM_SCROLLING_TEXT_H
+#define ANIM_SCROLLING_TEXT_H
+
+#include "i_animation.h"
+#include <string>
+
+class ScrollingTextAnimation : public IAnimation {
+public:
+    ScrollingTextAnimation(std::string text, unsigned long scrollDelay = 250);
+    void setup(IDisplayDriver* display) override;
+    void update() override;
+    bool isDone() override;
+
+private:
+    std::string _text;
+    unsigned long _scrollDelay;
+    unsigned long _lastScrollTime;
+    int _currentPosition;
+
+    bool _dotsWithPreviousChar;    
+};
+
+#endif // ANIM_SCROLLING_TEXT_H
+
+
+--- END FILE: bubble_led_clock/anim_scrolling_text.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/wifi_connector.h ---
+#ifndef WIFI_CONNECT_H
+#define WIFI_CONNECT_H
+
+bool WiFiConnect(const char *host, const char *ssid, const char *pass,
+                 const int attempts);
+
+#endif // WIFI_CONNECT_H
+
+--- END FILE: bubble_led_clock/wifi_connector.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/version.h ---
+#define APP_NAME "Bubble LED Clock"
+#define APP_AUTHOR "v01dma1n"
+#define APP_DATE "2025-09-17"
+
+#define VER_MAJOR 1
+#define VER_MINOR 4
+#define VER_BUILD 0
+
+#define APP_MESSAGE "The clock connects to NTP Server. Double-press Reset for Access Point."
+
+#include <string>
+
+#define VERSION_STRING                                                         \
+  (std::to_string(VER_MAJOR) + "." + std::to_string(VER_MINOR) + "." +         \
+   std::to_string(VER_BUILD))
+
+/* Known Problems
+
+  #issue002 Temperature and humidity is displayed as truncated NO DATA when OpenWeather is not configured.
+  Perhaps we should not display anything if the token is undefined.
+  
+  #issue004 Debug enum validation is hardcoded in access_point.c
+   form += "  <option value=\"" + String(APP_LOG_ERROR) + "\">Error</option>\n";
+   form += "  <option value=\"" + String(APP_LOG_INFO) + "\">Info</option>\n";
+   form += "  <option value=\"" + String(APP_LOG_DEBUG) + "\">Debug</option>\n";
+
+  #issue005 The time is incorrect when clock starts withoug WiFi.
+  It looks like the RTC time does not consider the TZ 
+
+  #issue006 The scrolling animation leaves the last character 
+  At the end of the animation, the last character does not disappear
+
+  #issue008 ...
+
+*/
+
+/* Version history
+
+2025-09-17 v.1.4 Access Point on Boot Press
+- #issue001 No way to start AP if WiFi is accessible
+- #issue007 The app name should not be hardcoded "AP MODE -- CONNECT TO BUBBLE-CLOCK"
+  auto apMessage = std::make_unique<ScrollingTextAnimation>("AP MODE -- CONNECT TO BUBBLE-CLOCK");
+
+2025-09-15 v.1.3 Code Refactoring 
+- Clock class renamed to DisplayManager
+- LOGMSG with log level added
+
+2025-09-15 v.1.2 Code Refactoring and file renaminig
+- The units are renamed with blc_ prefix if project-specific
+- Class names are aligned with units
+
+2025-09-13 v.1.1 #issue003 Time zone handling
+- Time Zone selection in captive portal is based on human-readable values
+- Time Zone setting is now done is FSM
+
+2025-09-13 v.1.0 Animations fixed, OpenWeather added
+- OpenWeather is used to retrieve the temperature and humidity
+- Animations in "scene" data structure defined
+
+2025-09-06 v.0.1 Date and Time with SlotMachine Animation
+- Date and Time animiated
+- WiFi connectivity
+- Captive Portal
+
+2025-09-07 v.0.2 Finite State Machine
+- Code refactored to use a SimpleFSM library
+
+*/
+
+/* ToDo
+*/
+
+--- END FILE: bubble_led_clock/version.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_fsm_wrappers.h ---
+#ifndef BLC_FSM_WRAPPERS_H
+#define BLC_FSM_WRAPPERS_H
+
+#include "blc_app.h"
+#include "blc_fsm_manager.h"
+
+// --- State Callback Wrappers ---
+inline void on_enter_wifi_connect_wrapper() { BubbleLedClockApp::getInstance().getFsmManager().on_enter_wifi_connect(); }
+inline void on_enter_ntp_sync_wrapper() { BubbleLedClockApp::getInstance().getFsmManager().on_enter_ntp_sync(); }
+inline void on_exit_ntp_sync_wrapper() { BubbleLedClockApp::getInstance().getFsmManager().on_exit_ntp_sync(); }
+inline void on_enter_ap_mode_wrapper() { BubbleLedClockApp::getInstance().getFsmManager().on_enter_ap_mode(); }
+inline void on_exit_ap_mode_wrapper() { BubbleLedClockApp::getInstance().getFsmManager().on_exit_ap_mode(); }
+inline void on_enter_running_normal_wrapper() { BubbleLedClockApp::getInstance().getFsmManager().on_enter_running_normal(); }
+
+
+// --- Guard Condition Wrappers ---
+inline bool guard_wifi_connected_wrapper() { return BubbleLedClockApp::getInstance().getFsmManager().guard_wifi_connected(); }
+inline bool guard_wifi_timed_out_wrapper() { return BubbleLedClockApp::getInstance().getFsmManager().guard_wifi_timed_out(); }
+inline bool guard_ntp_success_wrapper() { return BubbleLedClockApp::getInstance().getFsmManager().guard_ntp_success(); }
+inline bool guard_ntp_timeout_with_rtc_wrapper() { return BubbleLedClockApp::getInstance().getFsmManager().guard_ntp_timeout_with_rtc(); }
+inline bool guard_ntp_timeout_no_rtc_wrapper() { return BubbleLedClockApp::getInstance().getFsmManager().guard_ntp_timeout_no_rtc(); }
+inline bool guard_ap_timeout_with_rtc_wrapper() {  return BubbleLedClockApp::getInstance().getFsmManager().guard_ap_timeout_with_rtc(); }
+
+#endif // BLC_FSM_WRAPPERS_H
+--- END FILE: bubble_led_clock/blc_fsm_wrappers.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/anim_slot_machine.h ---
+#ifndef ANIM_SLOT_MACHINE_H
+#define ANIM_SLOT_MACHINE_H
+
+#include "i_animation.h"
+
+#include <string>
+
+class SlotMachineAnimation : public IAnimation {
+public:
+    SlotMachineAnimation(std::string targetText, 
+                         unsigned long lockDelay = 200, 
+                         unsigned long holdTime = 3000, 
+                         unsigned long spinDelay = 50,
+                         bool dotsWithPreviousChar = false);
+    ~SlotMachineAnimation();
+    void setup(IDisplayDriver* display);
+    void update() override;
+    bool isDone() override;
+
+private:
+  std::string _targetText;
+    std::string _currentText;
+    bool* _isLocked;
+    unsigned long _lockDelay;
+    unsigned long _holdTime;
+    unsigned long _spinDelay;
+    bool _dotsWithPreviousChar;
+
+    unsigned long _lastLockTime;
+    unsigned long _lastSpinTime;
+    int _lockedCount;
+    unsigned long _lockingCompleteTime;
+};
+
+#endif // ANIM_SLOT_MACHINE_H
+
+
+--- END FILE: bubble_led_clock/anim_slot_machine.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/openweather_client.cpp ---
+#include "openweather_client.h"
+
+#define ESP32DEBUGGING
+#include "debug.h"
+#include "blc_app.h"
+#include "blc_preferences.h"
+
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <Arduino.h>
+
+OpenWeatherData getOpenWeatherData() {
+    OpenWeatherData data;
+    HTTPClient http;
+    WiFiClientSecure client;
+    client.setInsecure(); // Bypass SSL certificate validation for simplicity
+
+    String city = BubbleLedClockApp::getInstance().getPrefs().config.owm_city;
+    city.replace(" ", "%20"); // the spaces in the cities mess up the URL
+    String state = BubbleLedClockApp::getInstance().getPrefs().config.owm_state_code;
+    String country = BubbleLedClockApp::getInstance().getPrefs().config.owm_country_code;
+
+    // Build the API request URL from the config file
+    String url = "https://api.openweathermap.org/data/2.5/weather?q=";
+    url += city;
+    url += ",";
+    url += "US";
+    url += "&appid=";
+    url += BubbleLedClockApp::getInstance().getPrefs().config.owm_api_key;
+    url += "&units=";
+    url += "imperial";
+
+    LOGMSG(APP_LOG_DEBUG, "Fetching weather from: %s", url.c_str());
+    if (http.begin(client, url)) {
+        http.setTimeout(15000); // 15-second timeout
+        int httpCode = http.GET();
+
+        if (httpCode == HTTP_CODE_OK) {
+            String payload = http.getString();
+            int tempIndex = payload.indexOf("\"temp\":");
+            int humidityIndex = payload.indexOf("\"humidity\":");
+            if (tempIndex != -1 && humidityIndex != -1) {
+                // Find the end of the temperature value (the comma)
+                int commaIndex = payload.indexOf(',', tempIndex);
+                String tempStr = payload.substring(tempIndex + 7, commaIndex);
+                data.temperatureF = tempStr.toFloat();
+
+                // Find the end of the humidity value (the closing brace)
+                int endIndex = payload.indexOf('}', humidityIndex);
+                String humidityStr = payload.substring(humidityIndex + 11, endIndex);
+                data.humidity = humidityStr.toFloat();
+                
+                data.isValid = true;
+                LOGMSG(APP_LOG_DEBUG, "Weather Parsed: %.1f F, %.0f%% Humidity", data.temperatureF, data.humidity);
+            } else {
+                LOGMSG(APP_LOG_DEBUG, "Failed to parse weather JSON: %s", payload.c_str());
+            }
+        } else {
+            LOGMSG(APP_LOG_ERROR, "HTTP GET request failed, error: %s %s", http.errorToString(httpCode).c_str(), http.errorToString(httpCode).c_str());
+        }
+        http.end();
+    } else {
+        LOGMSG(APP_LOG_ERROR, "Failed to begin HTTP client.");
+    }
+
+    return data;
+}
+
+--- END FILE: bubble_led_clock/openweather_client.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/i_display_driver.h ---
+#ifndef I_DISP_DRIVER_H
+#define I_DISP_DRIVER_H
+
+#include <Arduino.h> 
+
+class IDisplayDriver {
+public:
+    // Virtual destructor is important for base classes
+    virtual ~IDisplayDriver() {}
+
+    // Initializes the display hardware
+    virtual void begin() = 0;
+
+    // Returns the number of characters the display can show
+    virtual int getDisplaySize() = 0;
+
+    // Sets the brightness (e.g., 0-15)
+    virtual void setBrightness(uint8_t level) = 0;
+
+    // Clears the entire display
+    virtual void clear() = 0;
+
+    // Sets a single character at a specific position in the buffer
+    // The `dot` parameter controls the decimal point.
+    virtual void setChar(int position, char character, bool dot = false) = 0;
+
+    virtual void setSegments(int position, uint8_t mask) = 0;
+
+void print(const char* text, bool dotsWithPreviousChar = false) {
+    clear();
+    int displaySize = getDisplaySize();
+
+    // Dot is combined with the previous character.
+    if (dotsWithPreviousChar) {
+        int text_idx = 0;
+        int display_idx = 0;
+
+        // Loop while there's text left and space on the display.
+        while (text[text_idx] != '\0' && display_idx < displaySize) {
+            char currentChar = text[text_idx];
+
+            // If the current character is a dot, we just skip it,
+            // as it will be handled by the character before it.
+            if (currentChar == '.') {
+                text_idx++;
+                continue;
+            }
+
+            // Look ahead to see if the *next* character is a dot.
+            bool hasDot = (text[text_idx + 1] == '.');
+            
+            // Set the current character, enabling its dot if found.
+            setChar(display_idx, currentChar, hasDot);
+
+            // Advance both the display and text position.
+            display_idx++;
+            text_idx++;
+        }
+    } 
+    // Dot is treated as a separate character.
+    else {
+        // Loop through the input text and the display positions.
+        // Stop when we either run out of display space or the string ends.
+        for (int i = 0; i < displaySize && text[i] != '\0'; ++i) {
+            setChar(i, text[i], false);
+        }
+    }
+
+    writeDisplay();
+}
+
+    // Pushes the character buffer to the physical display to make it visible
+    virtual void writeDisplay() = 0;
+};
+
+#endif // I_DISP_DRIVER_H
+--- END FILE: bubble_led_clock/i_display_driver.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/disp_driver_ht16k33.cpp ---
+// File: disp_driver_ht16k33.cpp
+
+#include "disp_driver_ht16k33.h"
+#include <Arduino.h>
+#include <cctype> 
+#include <Wire.h> // Use the standard I2C library
+
+// HT16K33 Command Constants from datasheet
+#define HT16K33_CMD_OSCILLATOR_ON  0x21
+#define HT16K33_CMD_DISPLAY_ON     0x81
+#define HT16K33_CMD_BRIGHTNESS     0xE0
+
+// Font Table (this is unchanged)
+const uint8_t PROGMEM DispDriverHT16K33::sevensegfonttable[] = {
+    // ... font data remains here, no changes needed ...
+    0b00000000, 0b10000110, 0b00100010, 0b01111110, 0b01101101, 0b11010010,
+    0b01000110, 0b00100000, 0b00101001, 0b00001011, 0b00100001, 0b01110000,
+    0b00010000, 0b01000000, 0b10000000, 0b01010010, 0b00111111, 0b00000110,
+    0b01011011, 0b01001111, 0b01100110, 0b01101101, 0b01111101, 0b00000111,
+    0b01111111, 0b01101111, 0b00001001, 0b00001101, 0b01100001, 0b01001000,
+    0b01000011, 0b11010011, 0b01011111, 0b01110111, 0b01111100, 0b00111001,
+    0b01011110, 0b01111001, 0b01110001, 0b00111101, 0b01110110, 0b00110000,
+    0b00011110, 0b01110101, 0b00111000, 0b00010101, 0b00110111, 0b00111111,
+    0b01110011, 0b01101011, 0b00110011, 0b01101101, 0b01111000, 0b00111110,
+    0b00111110, 0b00101010, 0b01110110, 0b01101110, 0b01011011
+};
+
+DispDriverHT16K33::DispDriverHT16K33(uint8_t i2c_addr, int displaySize) 
+    : _displaySize(displaySize), _i2c_addr(i2c_addr) {
+    // Initialize buffer
+    for (int i = 0; i < 8; i++) {
+        _displayBuffer[i] = 0;
+    }
+}
+
+void DispDriverHT16K33::begin() {
+    Wire.begin();
+    // Turn on the oscillator
+    Wire.beginTransmission(_i2c_addr);
+    Wire.write(HT16K33_CMD_OSCILLATOR_ON);
+    Wire.endTransmission();
+    // Turn on the display, no blinking
+    Wire.beginTransmission(_i2c_addr);
+    Wire.write(HT16K33_CMD_DISPLAY_ON);
+    Wire.endTransmission();
+    // Set max brightness
+    setBrightness(15);
+}
+
+int DispDriverHT16K33::getDisplaySize() {
+    return _displaySize;
+}
+
+void DispDriverHT16K33::setBrightness(uint8_t level) {
+    if (level > 15) level = 15; // Brightness is 0-15
+    Wire.beginTransmission(_i2c_addr);
+    Wire.write(HT16K33_CMD_BRIGHTNESS | level);
+    Wire.endTransmission();
+}
+
+void DispDriverHT16K33::clear() {
+    for (int i = 0; i < 8; i++) {
+        _displayBuffer[i] = 0;
+    }
+}
+
+void DispDriverHT16K33::writeDisplay() {
+    Wire.beginTransmission(_i2c_addr);
+    Wire.write((uint8_t)0x00); // Start at RAM address 0
+
+    // Write all 8 digit values (16 bytes) to the display RAM
+    for (uint8_t i = 0; i < 8; i++) {
+        Wire.write(_displayBuffer[i] & 0xFF);
+        Wire.write(_displayBuffer[i] >> 8);
+    }
+    Wire.endTransmission();
+}
+
+void DispDriverHT16K33::setChar(int position, char character, bool dot) {
+    if (position < 0 || position >= _displaySize) return;
+
+    character = toupper(character);
+    uint8_t segments = pgm_read_byte(sevensegfonttable + character - ' ');
+    if (dot) {
+        segments |= 0b10000000;
+    }
+    // The Adafruit library maps digits right-to-left, so we preserve that
+    _displayBuffer[_displaySize - 1 - position] = segments;
+}
+
+void DispDriverHT16K33::setSegments(int position, uint8_t mask) {
+    if (position < 0 || position >= _displaySize) return;
+    _displayBuffer[_displaySize - 1 - position] = mask;
+}
+
+
+--- END FILE: bubble_led_clock/disp_driver_ht16k33.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/anim_scrolling_text.cpp ---
+#include <ESP32Logger.h>
+#include <Arduino.h>
+
+#include "anim_scrolling_text.h"
+
+ScrollingTextAnimation::ScrollingTextAnimation(std::string text, unsigned long scrollDelay)
+    : _text(text),
+      _scrollDelay(scrollDelay),
+      _lastScrollTime(0),
+      _currentPosition(0) {}
+
+void ScrollingTextAnimation::setup(IDisplayDriver* display) {
+    IAnimation::setup(display);
+    _currentPosition = -_display->getDisplaySize();
+}
+
+bool ScrollingTextAnimation::isDone() {
+    return _currentPosition >= (int)_text.length();
+}
+
+void ScrollingTextAnimation::update() {
+    if (isDone()) {
+        return;
+    }
+
+    unsigned long currentTime = millis();
+    if (currentTime - _lastScrollTime >= _scrollDelay) {
+        _lastScrollTime = currentTime;
+
+        _display->clear();
+        int displaySize = _display->getDisplaySize();
+
+        for (int i = 0; i < displaySize; ++i) {
+            int textIndex = _currentPosition + i;
+            if (textIndex >= 0 && textIndex < (int)_text.length()) {
+                _display->setChar(i, _text[textIndex]);
+            }
+        }
+
+        _display->writeDisplay();
+        _currentPosition++;
+    }
+}
+
+--- END FILE: bubble_led_clock/anim_scrolling_text.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/disp_driver_ht16k33.h ---
+#ifndef DISP_DRIVER_HT16K33_H
+#define DISP_DRIVER_HT16K33_H
+
+#include "i_display_driver.h"
+#include <Adafruit_GFX.h>
+#include "Adafruit_LEDBackpack.h"
+
+class DispDriverHT16K33 : public IDisplayDriver {
+public:
+    DispDriverHT16K33(uint8_t i2c_addr = 0x70, int displaySize = 8);
+    virtual ~DispDriverHT16K33() {}
+
+    void begin() override;
+    int getDisplaySize() override;
+    void setBrightness(uint8_t level) override;
+
+    void clear() override;
+    void setChar(int position, char character, bool dot = false) override;
+    void setSegments(int position, uint8_t mask) override;
+
+    void writeDisplay() override;
+
+private:
+    uint16_t _displayBuffer[8]; 
+    int _displaySize;
+    uint8_t _i2c_addr;
+
+    // Font table for character-to-segment mapping
+    static const uint8_t PROGMEM sevensegfonttable[]; 
+};
+
+#endif // DISP_DRIVER_HT16K33_H
+
+--- END FILE: bubble_led_clock/disp_driver_ht16k33.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/anim_slot_machine.cpp ---
+#include "anim_slot_machine.h"
+
+#include <Arduino.h>
+
+
+SlotMachineAnimation::SlotMachineAnimation(std::string targetText, 
+                                           unsigned long lockDelay, 
+                                           unsigned long holdTime, 
+                                           unsigned long spinDelay, 
+                                           bool dotsWithPreviousChar)
+    : _targetText(targetText),
+      _lockDelay(lockDelay),
+      _holdTime(holdTime),
+      _spinDelay(spinDelay), // Initialize spinDelay
+      _dotsWithPreviousChar(dotsWithPreviousChar),
+      _lastLockTime(0),
+      _lastSpinTime(0),      // Initialize spin timer
+      _lockedCount(0),
+      _lockingCompleteTime(0) {
+    _isLocked = nullptr;
+}
+
+SlotMachineAnimation::~SlotMachineAnimation() {
+    delete[] _isLocked;
+}
+
+void SlotMachineAnimation::setup(IDisplayDriver* display) {
+    IAnimation::setup(display);
+    int size = _display->getDisplaySize();
+    _currentText.resize(size, ' ');
+
+    delete[] _isLocked;
+    _isLocked = new bool[size];
+    for (int i = 0; i < size; ++i) {
+        _isLocked[i] = false;
+    }
+    
+    // Add this line to start the timer correctly
+    _lastLockTime = millis();
+    
+    randomSeed(analogRead(0));
+}
+
+bool SlotMachineAnimation::isDone() {
+    bool lockingComplete = _lockedCount >= _display->getDisplaySize();
+    // if (!lockingComplete) {
+    //     return false;
+    // }
+    // return (millis() - _lockingCompleteTime >= _holdTime);
+    return lockingComplete;
+}
+
+void SlotMachineAnimation::update() {
+    unsigned long currentTime = millis();
+
+    // Only update the display if spinDelay has passed
+    if (currentTime - _lastSpinTime < _spinDelay) {
+        return; // Not time to update yet
+    }
+    _lastSpinTime = currentTime; // Record the time of this update
+
+    if (isDone()) {
+        return;
+    }
+
+    // --- Logic for locking characters ---
+    bool lockingPhaseActive = _lockedCount < _display->getDisplaySize();
+    if (lockingPhaseActive) {
+        if (currentTime - _lastLockTime >= _lockDelay) {
+            _lastLockTime = currentTime;
+            if (_lockedCount < _display->getDisplaySize()) {
+                _isLocked[_lockedCount] = true;
+                _lockedCount++;
+
+                if (_lockedCount == _display->getDisplaySize()) {
+                    _lockingCompleteTime = millis();
+                }
+            }
+        }
+    }
+
+    // --- Display Drawing Logic ---
+     int displaySize = _display->getDisplaySize();
+    _display->clear();
+
+    // Use two different drawing loops based on the dot handling mode
+    if (_dotsWithPreviousChar) {
+        int text_idx = 0;
+        int display_idx = 0;
+        while (text_idx < _targetText.length() && display_idx < displaySize) {
+            char charToProcess = _targetText[text_idx];
+            if (charToProcess == '.') {
+                text_idx++;
+                continue;
+            }
+            bool hasDot = (_targetText[text_idx + 1] == '.');
+            char charToWrite = _isLocked[display_idx] ? charToProcess : (random(0, 10) + '0');
+            _display->setChar(display_idx, charToWrite, hasDot);
+            text_idx++;
+            display_idx++;
+        }
+    } else {
+        for (int i = 0; i < displaySize; ++i) {
+            char charToProcess = (i < _targetText.length()) ? _targetText[i] : ' ';
+            char charToWrite = _isLocked[i] ? charToProcess : (random(0, 10) + '0');
+            _display->setChar(i, charToWrite, false);
+        }
+    }
+    _display->writeDisplay();
+}
+--- END FILE: bubble_led_clock/anim_slot_machine.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/sntp_client.h ---
+#ifndef SNTP_CLIENT_H
+#define SNTP_CLIENT_H
+
+extern bool timeAvail;
+
+void setupSntp(const char* tz);
+
+int loopSntpGetTime(unsigned intervalMillis);
+
+// Member    Type  Meaning Range
+// tm_sec    int seconds after the minute  0-60*
+// tm_min    int minutes after the hour  0-59
+// tm_hour   int hours since midnight  0-23
+// tm_mday   int day of the month  1-31
+// tm_mon    int months since January  0-11
+// tm_year   int years since 1900
+// tm_wday   int days since Sunday 0-6
+// tm_yday   int days since January 1  0-365
+// tm_isdst  int Daylight Saving Time flag
+
+#endif // SNTP_CLIENT_H
+
+--- END FILE: bubble_led_clock/sntp_client.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/sntp_client.cpp ---
+#include "sntp_client.h"
+
+#include <esp_sntp.h>
+#include <Arduino.h>
+#include <time.h>
+
+const char *ntpServer1 = "pool.ntp.org";
+const char *ntpServer2 = "time.nist.gov";
+
+const long gmtOffset_sec = -3600 * 5;
+const int  daylightOffset_sec = 3600;
+const char *time_zone =
+    "EST5EDT,M3.2.0,M11.1.0"; // TimeZone rule including daylight adjustment
+                              // rules (optional)
+
+bool timeAvail = false;
+
+int lastMillis = 0;
+
+int loopSntpGetTime(unsigned intervalMillis) {
+  unsigned long currMillis = millis();
+
+  if (currMillis - lastMillis >= intervalMillis) {
+    lastMillis += intervalMillis;
+    struct tm timeinfo;
+    return getLocalTime(&timeinfo);
+  }
+  return 0;
+}
+
+// Callback function (get's called when time adjusts via NTP)
+void timeAvailable(struct timeval *t) {
+  timeAvail = true;
+
+  struct tm timeinfo;
+  getLocalTime(&timeinfo);
+}
+
+void setupSntp(const char* tz) {
+  // set notification call-back function
+  sntp_set_time_sync_notification_cb(timeAvailable);
+
+  /**
+   * NTP server address could be aquired via DHCP,
+   *
+   * NOTE: This call should be made BEFORE esp32 aquires IP address via DHCP,
+   * otherwise SNTP option 42 would be rejected by default.
+   * NOTE: configTime() function call if made AFTER DHCP-client run
+   * will OVERRIDE aquired NTP server address
+   */
+  esp_sntp_servermode_dhcp(1); // (optional)
+
+  /**
+   * This will set configured ntp servers and constant TimeZone/daylightOffset
+   * should be OK if your time zone does not need to adjust daylightOffset twice
+   * a year, in such a case time adjustment won't be handled automagicaly.
+   */
+  // configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2);
+  configTzTime(time_zone, ntpServer1, ntpServer2);
+
+  /**
+   * A more convenient approach to handle TimeZones with daylightOffset
+   * would be to specify a environmnet variable with TimeZone definition
+   * including daylight adjustmnet rules. A list of rules for your zone could be
+   * obtained from
+   * https://github.com/esp8266/Arduino/blob/master/cores/esp8266/TZ.h
+   */
+  configTzTime(time_zone, ntpServer1, ntpServer2);
+}
+
+--- END FILE: bubble_led_clock/sntp_client.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_scene_manager.cpp ---
+#include "blc_scene_manager.h"
+#include "debug.h"
+#include "blc_app.h"
+#include "anim_slot_machine.h"
+#include "anim_matrix.h"
+
+
+float BubbleLedClockApp_getTimeData() {
+  // This is a placeholder; time scenes are handled by the formatTime function.
+  return 0;
+}
+
+float BubbleLedClockApp_getTempData() {
+  // Calls the public getter on the app singleton for temperature.
+  return BubbleLedClockApp::getInstance().getTempData();
+}
+
+float BubbleLedClockApp_getHumidityData() {
+  // Calls the public getter on the app singleton for humidity.
+  return BubbleLedClockApp::getInstance().getHumidityData();
+}
+
+SceneManager::SceneManager(BubbleLedClockApp& app) : _app(app) {}
+
+void SceneManager::setup() {
+    static const DisplayScene scenePlaylist[] = {
+      { "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
+      { "%b %d",    SLOT_MACHINE, true,  10000, 200, 50, BubbleLedClockApp_getTimeData },
+      { "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
+      { "%3.0f F",  MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getTempData },
+      { "%3.0f PCT",MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getHumidityData }
+    };
+    _scenePlaylist = scenePlaylist;
+    _numScenes = sizeof(scenePlaylist) / sizeof(DisplayScene);
+    _currentSceneIndex = 0;
+    _sceneStartTime = 0;    
+    _lastWeatherFetchTime = 0;
+}
+
+#define AP_MODE_LONG_PRESS_DURATION 3000 // 3 seconds
+
+void SceneManager::update() {
+    // This logic only runs if the FSM is in the RUNNING_NORMAL state.
+    if (_app.getFsmManager().isInState("RUNNING_NORMAL") == false) {
+        return;
+    }
+
+    unsigned long currentTime = millis();
+    if (_app.getClock().isAnimationRunning()) {
+        return;
+    }
+
+    const DisplayScene& currentScene = _scenePlaylist[_currentSceneIndex];
+    if (currentTime - _sceneStartTime >= currentScene.duration_ms) {
+        _currentSceneIndex = (_currentSceneIndex + 1) % _numScenes;
+        _sceneStartTime = currentTime;
+        const DisplayScene& newScene = _scenePlaylist[_currentSceneIndex];
+
+        if (newScene.getDataValue == BubbleLedClockApp_getTempData || newScene.getDataValue == BubbleLedClockApp_getHumidityData) {
+            if (!_currentWeatherData.isValid || (millis() - _lastWeatherFetchTime >= _weatherFetchInterval)) {
+                _lastWeatherFetchTime = millis();
+                _currentWeatherData = getOpenWeatherData();
+                _app.setWeatherData(_currentWeatherData); // Update the main app's copy
+            }
+        }
+
+        char buffer[12];
+        time_t now = _app.isRtcActive() ? _app.getRtc().now().unixtime() : time(0);
+
+        if (newScene.getDataValue == BubbleLedClockApp_getTimeData) {
+            _app.formatTime(buffer, sizeof(buffer), newScene.format_string, now);
+        } else {
+            if (_currentWeatherData.isValid) {
+                float value = newScene.getDataValue();
+                snprintf(buffer, sizeof(buffer), newScene.format_string, value);
+            } else {
+                strncpy(buffer, "NO DATA", sizeof(buffer));
+            }
+        }
+
+        if (newScene.animation_type == SLOT_MACHINE) {
+            auto anim = std::make_unique<SlotMachineAnimation>(buffer, newScene.anim_param_1, 2000, newScene.anim_param_2, newScene.dots_with_previous);
+            _app.getClock().setAnimation(std::move(anim));
+        } else if (newScene.animation_type == MATRIX) {
+            auto anim = std::make_unique<MatrixAnimation>(buffer, newScene.anim_param_1, 2000, newScene.anim_param_2, newScene.dots_with_previous);
+            _app.getClock().setAnimation(std::move(anim));
+        }
+    } else {
+        char buffer[12];
+        time_t now = _app.isRtcActive() ? _app.getRtc().now().unixtime() : time(0);
+
+        if (currentScene.getDataValue == BubbleLedClockApp_getTimeData) {
+            _app.formatTime(buffer, sizeof(buffer), currentScene.format_string, now);
+        } else {
+            if (_currentWeatherData.isValid) {
+                float value = currentScene.getDataValue();
+                snprintf(buffer, sizeof(buffer), currentScene.format_string, value);
+            } else {
+                strncpy(buffer, "NO DATA", sizeof(buffer));
+            }
+        }
+        _app.getDisplay().print(buffer, currentScene.dots_with_previous);
+    }
+}
+
+
+--- END FILE: bubble_led_clock/blc_scene_manager.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_fsm_manager.cpp ---
+#include "blc_fsm_manager.h"
+#include "debug.h"
+#include "blc_app.h" 
+#include "blc_fsm_wrappers.h"
+#include "blc_access_point.h"
+#include "anim_scrolling_text.h"
+#include "sntp_client.h"
+
+#include <WiFi.h>
+
+BlcFsmManager::BlcFsmManager(BubbleLedClockApp& app) : _app(app) {}
+
+void BlcFsmManager::setup() {
+    static State states[] = {
+        State("WIFI_CONNECT", on_enter_wifi_connect_wrapper),
+        State("NTP_SYNC", on_enter_ntp_sync_wrapper, nullptr, on_exit_ntp_sync_wrapper),
+        State("AP_MODE", on_enter_ap_mode_wrapper, nullptr, on_exit_ap_mode_wrapper),
+        State("RUNNING_NORMAL", on_enter_running_normal_wrapper) 
+    };
+    static TimedTransition transitions[] = {
+        TimedTransition(&states[0], &states[1],   100, nullptr, "", guard_wifi_connected_wrapper),
+        TimedTransition(&states[0], &states[2], 30000, nullptr, "", guard_wifi_timed_out_wrapper),
+        TimedTransition(&states[1], &states[3],   100, nullptr, "", guard_ntp_success_wrapper),
+        TimedTransition(&states[1], &states[3], 15000, nullptr, "", guard_ntp_timeout_with_rtc_wrapper),
+        TimedTransition(&states[1], &states[2], 15000, nullptr, "", guard_ntp_timeout_no_rtc_wrapper),
+        TimedTransition(&states[2], &states[3], 60000, nullptr, "", guard_ap_timeout_with_rtc_wrapper),
+
+    };
+    int num_transitions = sizeof(transitions) / sizeof(TimedTransition);
+    _fsm.add(transitions, num_transitions);
+    _fsm.setInitialState(&states[0]);
+}
+
+void BlcFsmManager::update() {
+    _fsm.run(50);
+}
+
+bool BlcFsmManager::isInState(const String& stateName) const {
+    State* currentState = _fsm.getState();
+    if (currentState != nullptr) {
+        return currentState->getName() == stateName;
+    }
+    return false;
+}
+
+// --- FSM Callback Implementations ---
+void BlcFsmManager::on_enter_wifi_connect() {
+    LOGMSG(APP_LOG_INFO, "--> FSM entering WIFI_CONNECT state...");
+    WiFi.setHostname(AP_HOST_NAME);
+    WiFi.begin(_app.getPrefs().config.ssid, _app.getPrefs().config.password);
+    auto connectingMsg = std::make_unique<ScrollingTextAnimation>("CONNECTING TO WIFI...");
+    _app.getClock().setAnimation(std::move(connectingMsg));
+}
+
+void BlcFsmManager::on_enter_ntp_sync() {
+    LOGMSG(APP_LOG_INFO, "Entering STATE_NTP_SYNC");
+    setupSntp(_app.getPrefs().config.time_zone);
+    auto syncingMsg = std::make_unique<ScrollingTextAnimation>("WAITING FOR NTP SYNC...");
+    _app.getClock().setAnimation(std::move(syncingMsg));
+}
+
+void BlcFsmManager::on_exit_ntp_sync() {
+    _app.getClock().setAnimation(nullptr);
+}
+
+void BlcFsmManager::on_enter_ap_mode() {
+    LOGMSG(APP_LOG_INFO, "Entering STATE_AP_MODE");
+    setupAP(AP_HOST_NAME);
+    String msg = (String)"CONNECT TO " + AP_HOST_NAME;
+    auto apMessage = std::make_unique<ScrollingTextAnimation>(msg.c_str());
+    _app.getClock().setAnimation(std::move(apMessage));
+}
+
+void BlcFsmManager::on_exit_ap_mode() {
+    LOGMSG(APP_LOG_INFO, "Shutting down AP.");
+    WiFi.softAPdisconnect(true);
+    // WiFi.mode(WIFI_OFF);
+    _app.getClock().setAnimation(nullptr);
+}
+
+void BlcFsmManager::on_enter_running_normal() {
+    LOGMSG(APP_LOG_INFO, "FSM entering RUNNING_NORMAL state. SceneManager will now take over display.");
+}
+
+// --- FSM Guard Implementations ---
+bool BlcFsmManager::guard_wifi_connected() { return WiFi.status() == WL_CONNECTED; }
+bool BlcFsmManager::guard_wifi_timed_out() { return WiFi.status() != WL_CONNECTED; }
+bool BlcFsmManager::guard_ntp_success() { return timeAvail; }
+bool BlcFsmManager::guard_ntp_timeout_with_rtc() { return !timeAvail && _app.isRtcActive(); }
+bool BlcFsmManager::guard_ntp_timeout_no_rtc() { return !timeAvail && !_app.isRtcActive(); }
+bool BlcFsmManager::guard_ap_timeout_with_rtc() { return _app.isRtcActive(); }
+
+
+--- END FILE: bubble_led_clock/blc_fsm_manager.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/bubble_led_clock.ino ---
+#include "blc_app.h"
+
+// Define the mutex here
+SemaphoreHandle_t serialMutex = NULL;
+
+// The single global instance of the application
+BubbleLedClockApp& app = BubbleLedClockApp::getInstance();
+
+void setup() {
+  
+  Serial.begin(115200);
+  delay(200);
+  Serial.println("\nStarting...");
+
+  // Create the mutex before any other tasks might use it
+  serialMutex = xSemaphoreCreateMutex();
+
+  app.setup();
+
+  app.getPrefs().dumpPreferences();
+
+  snprintf(app.getPrefs().config.owm_api_key, MAX_PREF_STRING_LEN, "6639678a4c920f9349923ff9467d7747");
+  app.getPrefs().putPreferences();
+
+  Serial.println("\n... setup complete");
+}
+
+void loop() {
+  app.loop();
+}
+--- END FILE: bubble_led_clock/bubble_led_clock.ino ---
+
+
+--- BEGIN FILE: bubble_led_clock/openweather_client.h ---
+#ifndef OPENWEATHER_CLIENT_H
+#define OPENWEATHER_CLIENT_H
+
+struct OpenWeatherData {
+  float temperatureF;
+  float humidity;
+  bool isValid = false; // Flag to check if the data is good
+};
+
+// Function to get the latest weather data from OpenWeatherMap
+OpenWeatherData getOpenWeatherData();
+
+#endif // OPENWEATHER_CLIENT_H
+
+--- END FILE: bubble_led_clock/openweather_client.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_scene_manager.h ---
+#ifndef BLC_SCENE_MANAGER_H
+#define BLC_SCENE_MANAGER_H
+
+#include "blc_types.h"
+#include "openweather_client.h"
+
+class BubbleLedClockApp; // Forward-declaration
+
+class SceneManager {
+public:
+    SceneManager(BubbleLedClockApp& app);
+    
+    void setup();
+    void update();
+
+private:
+    BubbleLedClockApp& _app;
+
+    // State for the scene playlist
+    const DisplayScene* _scenePlaylist;
+    int _numScenes;
+    int _currentSceneIndex;
+    unsigned long _sceneStartTime;
+
+    // State for weather data
+    OpenWeatherData _currentWeatherData;
+    unsigned long _lastWeatherFetchTime;
+    const unsigned long _weatherFetchInterval = 900000; // 15 minutes
+
+};
+
+#endif // BLC_SCENE_MANAGER_H
+--- END FILE: bubble_led_clock/blc_scene_manager.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/display_manager.h ---
+#ifndef DISPLAY_MANAGER_H
+#define DISPLAY_MANAGER_H
+
+#include <Arduino.h> 
+#include <memory> // For std::unique_ptr
+
+#include "i_display_driver.h"
+#include "i_animation.h"
+
+class DisplayManager {
+public:
+    // The constructor takes a reference to our abstract display driver.
+    DisplayManager(IDisplayDriver& display);
+
+    void begin();
+    void update(); // This should be called in the main loop()
+
+    // Sets the animation to be played.
+    // unique_ptr automatically handles memory management.
+    void setAnimation(std::unique_ptr<IAnimation> animation);
+
+    bool isAnimationRunning() const;
+
+private:
+    IDisplayDriver& _display; // Reference to the display driver
+    std::unique_ptr<IAnimation> _currentAnimation; // The current animation
+};
+
+#endif // DISPLAY_MANAGER_H
+
+--- END FILE: bubble_led_clock/display_manager.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/blc_access_point.cpp ---
+#include "blc_access_point.h"
+
+#include "blc_app.h"
+#define ESP32DEBUGGING
+#include "debug.h"
+#include "blc_preferences.h"
+#include "blc_types.h"
+#include "tz_data.h"
+
+#include "AsyncTCP.h"
+#include "ESPAsyncWebServer.h"
+#include <DNSServer.h>
+#include <WiFi.h>
+#include <stdexcept>
+
+
+DNSServer *dnsServer;
+AsyncWebServer *server;
+
+// Define an array of form fields
+FormField formFields[NUM_FORM_FIELDS];
+
+void initializeFormFields() {
+    // Get a reference to the preferences object once
+    AppPreferences& appPrefs = BubbleLedClockApp::getInstance().getPrefs();
+
+    // --- WIFI_SSID ---
+    formFields[WIFI_SSID].id = "WiFiSSIDInput";
+    formFields[WIFI_SSID].name = "WiFi SSID";
+    formFields[WIFI_SSID].isMasked = false;
+    formFields[WIFI_SSID].validation = VALIDATION_NONE;
+    formFields[WIFI_SSID].prefType = PREF_STRING;
+    formFields[WIFI_SSID].pref.str_pref = appPrefs.config.ssid;
+
+    // --- PASSWORD ---
+    formFields[PASSWORD].id = "PasswordInput";
+    formFields[PASSWORD].name = "Password";
+    formFields[PASSWORD].isMasked = true;
+    formFields[PASSWORD].validation = VALIDATION_NONE;
+    formFields[PASSWORD].prefType = PREF_STRING;
+    formFields[PASSWORD].pref.str_pref = appPrefs.config.password;
+
+    // --- TIME_ZONE ---
+    formFields[TIME_ZONE].id = "TimeZoneInput";
+    formFields[TIME_ZONE].name = "Time Zone";
+    formFields[TIME_ZONE].isMasked = false;
+    formFields[TIME_ZONE].validation = VALIDATION_NONE;
+    formFields[TIME_ZONE].prefType = PREF_SELECT;
+    formFields[TIME_ZONE].pref.str_pref = appPrefs.config.time_zone;
+    formFields[TIME_ZONE].select_options = timezones;
+    formFields[TIME_ZONE].num_select_options = num_timezones;
+
+    // --- LOG_LEVEL ---
+    formFields[LOG_LEVEL].id = "logLevel";
+    formFields[LOG_LEVEL].name = "Log Level";
+    formFields[LOG_LEVEL].isMasked = false;
+    formFields[LOG_LEVEL].validation = VALIDATION_NONE;
+    formFields[LOG_LEVEL].prefType = PREF_ENUM;
+    formFields[LOG_LEVEL].pref.enum_pref = &appPrefs.config.logLevel;
+
+    // --- OWM_CITY ---
+    formFields[OWM_CITY].id = "OwmCityInput";
+    formFields[OWM_CITY].name = "OWM City";
+    formFields[OWM_CITY].isMasked = false;
+    formFields[OWM_CITY].validation = VALIDATION_NONE;
+    formFields[OWM_CITY].prefType = PREF_STRING;
+    formFields[OWM_CITY].pref.str_pref = appPrefs.config.owm_city;
+
+    // --- OWM_API_KEY ---
+    formFields[OWM_API_KEY].id = "OwmApiKeyInput";
+    formFields[OWM_API_KEY].name = "OWM API Key";
+    formFields[OWM_API_KEY].isMasked = true;
+    formFields[OWM_API_KEY].validation = VALIDATION_NONE;
+    formFields[OWM_API_KEY].prefType = PREF_STRING;
+    formFields[OWM_API_KEY].pref.str_pref = appPrefs.config.owm_api_key;
+
+    // --- OWM_STATE_CODE ---
+    formFields[OWM_STATE_CODE].id = "OwmStateCodeInput";
+    formFields[OWM_STATE_CODE].name = "OWM State Code";
+    formFields[OWM_STATE_CODE].isMasked = false;
+    formFields[OWM_STATE_CODE].validation = VALIDATION_NONE;
+    formFields[OWM_STATE_CODE].prefType = PREF_STRING;
+    formFields[OWM_STATE_CODE].pref.str_pref = appPrefs.config.owm_state_code;
+
+    // --- OWM_COUNTRY_CODE ---
+    formFields[OWM_COUNTRY_CODE].id = "OwmCountryCodeInput";
+    formFields[OWM_COUNTRY_CODE].name = "OWM Country Code";
+    formFields[OWM_COUNTRY_CODE].isMasked = false;
+    formFields[OWM_COUNTRY_CODE].validation = VALIDATION_NONE;
+    formFields[OWM_COUNTRY_CODE].prefType = PREF_STRING;
+    formFields[OWM_COUNTRY_CODE].pref.str_pref = appPrefs.config.owm_country_code;
+}
+
+#define PASSWORD_MASKED "************"
+
+#define HTML_JAVASCRIPT_PLACEHOLDER "%JAVASCRIPT_PLACEHOLDER%"
+#define HTML_FORM_PLACEHOLDER "%FORM_PLACEHOLDER%"
+
+const char index_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bubble LED Display Settings</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Old+Standard+TT&display=swap"> 
+<!--    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=MedievalSharp&display=swap"> -->
+<!--    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond&display=swap"> -->
+    %JAVASCRIPT_PLACEHOLDER%/home/voidmain/projects/local/bubble_led_clock/src/bubble_led_clock/bubble_led_clock_app.h
+    <style>
+        body {
+            background-image: url('https://plus.unsplash.com/premium_photo-1667761637876-e704c906927d'); 
+            background-color: #f0e68c; /* Optional: Set a background color to ensure image covers the entire background */
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            background-size: cover;
+        }
+        h1:first-child {
+			font-family: "Cormorant Garamond", "MedievalSharp", "Old Standard TT", "Blackletter", "Old English Text MT", "Times New Roman", serif;
+			text-align: center;
+			font-weight: bold;
+        }
+        td:first-child, input[type="submit"] {
+            text-align: right;
+			font-family: "Cormorant Garamond", "MedievalSharp", "Old Standard TT", "Blackletter", "Old English Text MT", "Times New Roman", serif;
+			font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Bubble LED Clock Settings</h1>
+    "%FORM_PLACEHOLDER%"
+</body>
+</html>)rawliteral";
+
+String generateJavascript(const FormField *formFields, int numFields) {
+
+  String script = R"(
+<script>
+  window.onload = function() {
+)";
+
+  for (int i = 0; i < numFields; ++i) {
+    const FormField &field = formFields[i];
+
+    if (field.isMasked) {
+      continue;
+    }
+
+    script += "    const " + String(field.id) +
+              " = document.getElementById(\"" + String(field.id) + "\");\n";
+    if (field.prefType == PREF_STRING) {
+      script += "    " + String(field.id) + ".value = \"" +
+                String(field.pref.str_pref) + "\";\n";
+    } else if (field.prefType == PREF_BOOL) {
+      // script += "    " + String(field.id) + ".value = \"" +
+      //           String(*(field.pref.bool_pref) ? "checked" : "") + "\";\n";
+      // Correctly set the checked property of the checkbox
+      script += "    " + String(field.id) + ".checked = " +
+                String(*(field.pref.bool_pref) ? "true" : "false") + ";\n";
+    } else if (field.prefType == PREF_INT) {
+      script += "    " + String(field.id) + ".value = \"" +
+                String(*(field.pref.int_pref)) + "\";\n";
+    } else if (field.prefType == PREF_ENUM) {
+      script += "    " + String(field.id) + ".value = \"" +
+                String(*(field.pref.enum_pref)) + "\";\n";
+    }
+  }
+
+  script += R"(
+  };
+</script>
+)";
+
+  return script;
+}
+
+String generateForm(const FormField *formFields, int numFields) {
+
+  String form = R"(
+<form action="/get">
+<table>
+)";
+
+  for (int i = 0; i < numFields; ++i) {
+    const FormField &field = formFields[i];
+    form += "<tr>\n";
+    form += "<td>" + String(field.name) + ":</td>\n";
+    if (field.prefType == PREF_STRING) {
+        String inputTag = "<input type=\"";
+        inputTag += (field.isMasked ? "password" : "text");
+        inputTag += "\" name=\"" + String(field.name) + "\" id=\"" + String(field.id) + "\"";
+
+        // If the field is masked AND a value is already saved, pre-fill with the placeholder.
+        if (field.isMasked && strlen(field.pref.str_pref) > 0) {
+            inputTag += " value=\"" + String(PASSWORD_MASKED) + "\"";
+        }
+        inputTag += ">";
+        form += "<td>" + inputTag + "</td>\n";
+    } else if (field.prefType == PREF_BOOL) {
+      form += "<td><input type=\"" + String("checkbox") + "\" name=\"" +
+              String(field.name) + "\" id=\"" + String(field.id) + "\" " +
+              (*(field.pref.bool_pref) ? +" checked" : "") + "></td>\n";
+      // if (*(field.pref.bool_pref))
+      //   form += " checked";
+    } else if (field.prefType == PREF_INT) {
+      form += "<td><input type=\"" + String("number") + "\" name=\"" +
+              String(field.name) + "\" id=\"" + String(field.id) + "\"></td>\n";
+    } else if (field.prefType == PREF_ENUM) {
+      form += "<td><select name=\"" + String(field.name) + "\" id=\"" +
+              String(field.id) + "\">\n";
+      form += "  <option value=\"" + String(APP_LOG_ERROR) + "\">Error</option>\n";
+      form += "  <option value=\"" + String(APP_LOG_INFO) + "\">Info</option>\n";
+      form += "  <option value=\"" + String(APP_LOG_DEBUG) + "\">Debug</option>\n";
+      form += "</select></td>\n";
+    } else if (field.prefType == PREF_SELECT) {
+        form += "<td><select name=\"" + String(field.name) + "\" id=\"" + String(field.id) + "\">\n";
+        for (int j = 0; j < field.num_select_options; ++j) {
+            form += "  <option value=\"" + String(field.select_options[j].value) + "\"";
+            if (strcmp(field.pref.str_pref, field.select_options[j].value) == 0) {
+                form += " selected";
+            }
+            form += ">" + String(field.select_options[j].name) + "</option>\n";
+        }
+        form += "</select></td>\n";
+    } else {
+      form += "<\td>\n";
+    }
+    form += "</tr>\n";
+  }
+
+  form += R"(
+<tr>
+  <td colspan="2"><input type="submit"></td>
+</tr>
+</table>
+</form>
+)";
+
+  return form;
+}
+
+String assembleHtml(const FormField *formFields, int numFields) {
+  String html = String(index_html);
+
+  // Replace Javascript Placeholder
+  String generatedJavascript = generateJavascript(formFields, numFields);
+  html.replace("%JAVASCRIPT_PLACEHOLDER%", generatedJavascript);
+
+  // Generate and replace Form Placeholder
+  String formHtml = generateForm(formFields, numFields);
+  html.replace("%FORM_PLACEHOLDER%", formHtml);
+
+  return html;
+}
+
+void replaceSubstring(String &str, String &oldStr, String &newStr) {
+  size_t pos = str.indexOf(oldStr);
+  while (pos != -1) {
+    str.replace(oldStr, newStr);
+    pos = str.indexOf(oldStr, pos + newStr.length());
+  }
+}
+
+String loadStringFromPROGMEM(const char *str) {
+
+  size_t len = strlen(str);
+  char *buffer = (char *)malloc(len + 1);
+  strcpy(buffer, str);
+  String s(buffer);
+  free(buffer);
+  return s;
+}
+
+bool validateInput(String inp, FieldValidation validation) {
+
+  bool ret = false;
+
+  switch (validation) {
+  case VALIDATION_NONE:
+    ret = true;
+    break;
+
+  case VALIDATION_INTEGER: 
+    ret = true;
+    // ToDo: validate integer
+    break;
+  
+  case VALIDATION_IP_ADDRESS:
+    IPAddress addr;
+    ret = addr.fromString(inp.c_str());
+    break;
+
+    // case VALIDATION_ENUM:
+    //   int intVal = inp.toInt();
+    //   ret = (intVal == ERROR || intVal == INFO || intVal == DEBUG);
+    //   break;
+  }
+
+  return ret;
+}
+
+class CaptiveRequestHandler : public AsyncWebHandler {
+public:
+  CaptiveRequestHandler() {}
+  virtual ~CaptiveRequestHandler() {}
+
+  bool canHandle(AsyncWebServerRequest *request) {
+    // request->addInterestingHeader("ANY");
+    return true;
+  }
+
+  void handleRequest(AsyncWebServerRequest *request) {
+
+    LOGMSG(APP_LOG_DEBUG,"handleRequest\n");
+    String indexHtml = loadStringFromPROGMEM(index_html);
+    BubbleLedClockApp::getInstance().getPrefs().getPreferences();
+
+    String substitutedHtml = assembleHtml(formFields, NUM_FORM_FIELDS);
+
+    request->send(200, "text/html", substitutedHtml);
+  }
+};
+
+void sendHtmlPage(AsyncWebServerRequest *request) {
+  String indexHtml = loadStringFromPROGMEM(index_html);
+  BubbleLedClockApp::getInstance().getPrefs().getPreferences();
+  LOGMSG(APP_LOG_INFO,".");
+  BubbleLedClockApp::getInstance().getPrefs().dumpPreferences();
+  String substitutedHtml = assembleHtml(formFields, NUM_FORM_FIELDS);
+  request->send(200, "text/html", substitutedHtml);
+}
+
+void setupServer() {
+
+  server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    LOGMSG(APP_LOG_INFO,".");
+    sendHtmlPage(request);
+    LOGMSG(APP_LOG_DEBUG,"Client Connected");
+  });
+
+  server->on("/get", HTTP_GET, [](AsyncWebServerRequest *request) {
+    String inputMessage;
+    String inputParam;
+    char msg[150]{};
+
+    // validate input first
+    bool valid = true;
+    for (FormField &field : formFields) {
+      if (request->hasParam(field.name)) {
+        String val = request->getParam(field.name)->value();
+        if (!validateInput(val, field.validation)) {
+          snprintf(msg, sizeof(msg),
+                   "Validation failed for field %s and value '%s'.<br><a "
+                   "href=\"/\">Return to Home Page</a> ",
+                   field.name, val.c_str());
+          LOGMSG(APP_LOG_ERROR,"%s", msg);
+          valid = false;
+          break; // do not look any further
+        }
+      }
+    }
+
+    if (valid) {
+      for (FormField &field : formFields) {
+        if (request->hasParam(field.name)) {
+          String val = request->getParam(field.name)->value();
+          field.value = val;
+          field.received = true;
+        }
+      }
+    }
+
+    if (strlen(msg) == 0) {
+      snprintf(msg, sizeof(msg),
+               "The values entered by you have been successfully sent to the "
+               "device <br><a href=\"/\">Return to Home Page</a>\n");
+      processAPInput();
+    }
+    request->send(200, "text/html", msg);
+  });
+}
+
+void setupAP(const char *hostName) {
+  
+  initializeFormFields();
+
+  LOGMSG(APP_LOG_INFO,"Setting up AP Mode");
+  WiFi.mode(WIFI_AP);
+  LOGMSG(APP_LOG_INFO,"Host: %s", hostName);
+  WiFi.softAP(hostName);
+  String apIP = WiFi.softAPIP().toString();
+  LOGMSG(APP_LOG_INFO,"AP IP address: %s", apIP.c_str());
+
+  server = new AsyncWebServer(80);
+  dnsServer = new DNSServer();
+
+  LOGMSG(APP_LOG_DEBUG,"Setting up Async WebServer");
+  setupServer();
+
+  server->begin(); // start the Web Server first (memoy allocation)
+
+  LOGMSG(APP_LOG_DEBUG,"Starting DNS Server");
+  dnsServer->start(DNS_SERVER_PORT, "*", WiFi.softAPIP());
+  
+  server->addHandler(new CaptiveRequestHandler())
+      .setFilter(ON_AP_FILTER); // only when requested from AP
+  // more handlers...
+  
+  LOGMSG(APP_LOG_DEBUG,"All Done!");
+  BubbleLedClockApp::getInstance().getPrefs().getPreferences();
+  BubbleLedClockApp::getInstance().getPrefs().dumpPreferences();
+}
+
+using namespace std;
+
+void processAPInput() {
+  bool restart{false};
+
+  dnsServer->processNextRequest();
+
+  for (FormField &field : formFields) {
+    if (field.received) {
+      if (field.prefType == PREF_STRING) {
+        strncpy(field.pref.str_pref, field.value.c_str(),
+                MAX_PREF_STRING_LEN - 1);
+        field.pref.str_pref[MAX_PREF_STRING_LEN - 1] = '\0';
+      } else if (field.prefType == PREF_BOOL) {
+        *(field.pref.bool_pref) = field.value == "on";
+      } else if (field.prefType == PREF_INT) {
+        try {
+          *(field.pref.int_pref) = std::stoi(field.value.c_str());
+        } catch (const std::invalid_argument &e) {
+          LOGMSG(APP_LOG_ERROR,"Invalid integer value for field %s: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.int_pref) = 0; // Set to default 0
+          continue;
+        } catch (const std::out_of_range &e) {
+          LOGMSG(APP_LOG_ERROR,"Integer value out of range for field %s: %s",
+                 field.name, field.value.c_str());
+          *(field.pref.int_pref) = 0; // Set to default 0
+          continue;
+        } // try
+      } else if (field.prefType == PREF_ENUM) {
+        try {
+          LOGMSG(APP_LOG_DEBUG,"field.name: %s, field.value: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.enum_pref) =
+              static_cast<AppLogLevel>(std::stoi(field.value.c_str()));
+        } catch (const std::invalid_argument &e) {
+          LOGMSG(APP_LOG_ERROR,"Invalid enum value for field %s: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.enum_pref) = APP_LOG_ERROR; // Set to default ERROR
+          continue;
+        } catch (const std::out_of_range &e) {
+          LOGMSG(APP_LOG_ERROR,"Enum value out of range for field %s: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.enum_pref) = APP_LOG_ERROR; // Set to default ERROR
+          continue;
+        } // try
+      }
+      field.received = false;
+      restart = true;
+    }
+  }
+  if (restart) {
+    LOGMSG(APP_LOG_DEBUG,"AP Restarting");
+    BubbleLedClockApp::getInstance().getPrefs().putPreferences();
+    delay(100);
+    ESP.restart();
+  }
+}
+
+unsigned long apBootMillis = millis();
+
+void loopAP(unsigned long apRebootTimeMillis) {
+  unsigned long curr_millis = millis();
+  bool restart{false};
+
+  dnsServer->processNextRequest();
+
+  for (FormField &field : formFields) {
+    if (field.received) {
+      if (field.prefType == PREF_STRING)
+        ; // field.value = field.value;  // this is nonsense :)
+      else if (field.prefType == PREF_BOOL)
+        *(field.pref.bool_pref) = field.value == "true";
+      else if (field.prefType == PREF_INT) {
+        try {
+          *(field.pref.int_pref) = std::stoi(
+              field.value.c_str()); // Use std::stoi for safe conversion
+          LOGMSG(APP_LOG_DEBUG,"PREF_INT field %s: %s (%ld)", field.name,
+                 field.value.c_str(), *(field.pref.int_pref));
+        } catch (const std::invalid_argument &e) {
+          LOGMSG(APP_LOG_ERROR,"Invalid integer value for field %s: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.int_pref) = 0; // Set to default 0
+          continue;
+        } catch (const std::out_of_range &e) {
+          LOGMSG(APP_LOG_ERROR,"Integer value out of range for field %s: %s",
+                 field.name, field.value.c_str());
+          *(field.pref.int_pref) = 0; // Set to default 0
+          continue;
+        } // try
+      } else if (field.prefType == PREF_ENUM) {
+        try {
+          LOGMSG(APP_LOG_ERROR,"field.name: %s, field.value: %s", field.name,
+                 field.value);
+          *(field.pref.enum_pref) =
+              static_cast<AppLogLevel>(std::stoi(field.value.c_str()));
+          LOGMSG(APP_LOG_ERROR,"PREF_ENUM field %s: %s (%d)", field.name,
+                 field.value.c_str(), *(field.pref.enum_pref));
+        } catch (const std::invalid_argument &e) {
+          LOGMSG(APP_LOG_ERROR,"Invalid enum value for field %s: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.enum_pref) = APP_LOG_ERROR; // Set to default ERROR
+          continue;
+        } catch (const std::out_of_range &e) {
+          LOGMSG(APP_LOG_ERROR,"Enum value out of range for field %s: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.enum_pref) = APP_LOG_ERROR; // Set to default ERROR
+          continue;
+        }
+      }
+      field.received = false;
+      restart = true;
+    }
+  }
+
+  if (restart) {
+    LOGMSG(APP_LOG_DEBUG,"Restarting");
+    BubbleLedClockApp::getInstance().getPrefs().putPreferences();
+    ESP.restart();
+  } else if (curr_millis >= apBootMillis + apRebootTimeMillis) {
+    LOGMSG(APP_LOG_DEBUG,"Restarting AP after %ld milliseconds", apBootMillis);
+    ESP.restart();
+  }
+}
+--- END FILE: bubble_led_clock/blc_access_point.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/anim_matrix.h ---
+#ifndef ANIM_MATRIX_H
+#define ANIM_MATRIX_H
+
+#include <string>
+#include <vector>
+
+#include "i_animation.h"
+
+class MatrixAnimation : public IAnimation {
+public:
+    MatrixAnimation(std::string targetText,
+                    unsigned long revealDelay = 200,
+                    unsigned long holdTime = 2000,
+                    unsigned long rainDelay = 50,
+                    bool dotsWithPreviousChar = false);
+    
+    ~MatrixAnimation() override = default;
+
+    void setup(IDisplayDriver* display) override;
+    void update() override;
+    bool isDone() override;
+
+private:
+    std::string _targetText;
+    bool _dotsWithPreviousChar;
+    
+    // Parsed text and dot states
+    std::string _parsedTargetText;
+    std::vector<bool> _dotState;
+
+    // Timing controls
+    unsigned long _revealDelay;
+    unsigned long _holdTime;
+    unsigned long _rainDelay;
+
+    // State variables
+    unsigned long _lastRainTime;
+    unsigned long _lastRevealTime;
+    unsigned long _revealCompleteTime;
+    int _revealedCount;
+    
+    std::vector<std::vector<float>> _rainPos;
+};
+
+#endif // ANIM_MATRIX_H
+--- END FILE: bubble_led_clock/anim_matrix.h ---
+
+
+--- BEGIN FILE: bubble_led_clock/tz_data.cpp ---
+#include "tz_data.h"
+
+const PrefSelectOption timezones[] = {
+  {"(GMT-12:00) International Date Line West", "Etc/GMT+12"},
+  {"(GMT-11:00) Midway Island, Samoa", "Pacific/Samoa"},
+  {"(GMT-10:00) Hawaii", "Pacific/Honolulu"},
+  {"(GMT-09:00) Alaska", "America/Anchorage"},
+  {"(GMT-08:00) Pacific Time (US & Canada)", "PST8PDT,M3.2.0,M11.1.0"},
+  {"(GMT-07:00) Mountain Time (US & Canada)", "MST7MDT,M3.2.0,M11.1.0"},
+  {"(GMT-06:00) Central Time (US & Canada)", "CST6CDT,M3.2.0,M11.1.0"},
+  {"(GMT-05:00) Eastern Time (US & Canada)", "EST5EDT,M3.2.0,M11.1.0"},
+  {"(GMT-04:00) Atlantic Time (Canada)", "America/Halifax"},
+  {"(GMT-03:00) Buenos Aires, Georgetown", "America/Argentina/Buenos_Aires"},
+  {"(GMT-02:00) Mid-Atlantic", "Atlantic/South_Georgia"},
+  {"(GMT-01:00) Azores, Cape Verde Is.", "Atlantic/Azores"},
+  {"(GMT+00:00) Greenwich Mean Time : Dublin, Edinburgh, Lisbon, London", "GMT0BST,M3.5.0/1,M10.5.0"},
+  {"(GMT+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna", "CET-1CEST,M3.5.0,M10.5.0"},
+  {"(GMT+02:00) Athens, Bucharest, Istanbul", "EET-2EEST,M3.5.0/3,M10.5.0/4"},
+  {"(GMT+03:00) Moscow, St. Petersburg, Volgograd", "Europe/Moscow"},
+  {"(GMT+08:00) Beijing, Perth, Singapore, Hong Kong", "Asia/Hong_Kong"},
+  {"(GMT+09:00) Tokyo, Seoul, Osaka, Sapporo, Yakutsk", "Asia/Tokyo"},
+  {"(GMT+10:00) Brisbane, Canberra, Melbourne, Sydney", "Australia/Sydney"},
+  {"(GMT+12:00) Auckland, Wellington", "Pacific/Auckland"}
+};
+
+const int num_timezones = sizeof(timezones) / sizeof(PrefSelectOption);
+--- END FILE: bubble_led_clock/tz_data.cpp ---
+
+
+--- BEGIN FILE: bubble_led_clock/i_animation.h ---
+#ifndef I_ANIM_H
+#define I_ANIM_H
+
+#include "i_display_driver.h"
+
+class IAnimation {
+public:
+    virtual ~IAnimation() {}
+
+    // Setup is called once when the animation starts
+    virtual void setup(IDisplayDriver* display) {
+        _display = display;
+    }
+
+    // Update is called on every loop iteration to draw the next frame
+    virtual void update() = 0;
+
+    // Returns true if the animation has finished
+    virtual bool isDone() = 0;
+
+protected:
+    IDisplayDriver* _display;
+};
+
+#endif // I_ANIM_H
+--- END FILE: bubble_led_clock/i_animation.h ---
+
+
