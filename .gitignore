@@ -1,7 +1,7 @@
 .gitignore
 3d.local/
 fsm/
-Photos.local/
+photos.local/
 *~
 *.gcode
 
