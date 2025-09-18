@@ -12,3 +12,5 @@ ESP32-based clock with old calculator bubble LED display.
   * Open Weather API key
 * Access Point mode is activated by pressing Reset button twice within 3 seconds
 * The clock can connect to OpenWeather and read temperature and humidity
+
+<img src="Photos/20250917_200239.jpg" alt="Bubble LEDClock photo with red vintage calculator display" width="300">
