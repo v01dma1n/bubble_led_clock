@@ -1,7 +1,6 @@
-#include <ESP32Logger.h>
-#include <Arduino.h>
-
 #include "anim_scrolling_text.h"
+
+#include <Arduino.h>
 
 ScrollingTextAnimation::ScrollingTextAnimation(std::string text, unsigned long scrollDelay)
     : _text(text),

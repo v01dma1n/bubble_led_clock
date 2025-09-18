@@ -12,19 +12,19 @@
   * https://www.adafruit.com/product/1427
 
 ## Libraries
-- ESP32Logger2 v.1.0.3 
-- WiFi v.3.3.0 
-- Networking v.3.3.0 
-- RTClib v.2.1.4 
-- Adafruit BusIO v.1.17.2 
-- Wire v.3.3.0 
-- Adafruit GFX Library v.1.12.1 
-- SPI v.3.3.0 
-- Adafruit LED Backpack Library v.1.5.1 
-- Preferences v.3.3.0 
-- Async TCP v.3.4.7 
-- ESP Async WebServer v.3.8.0 
-- FS v.3.3.0 
-- DNSServer v.3.3.0 
-- ESP32 Async UDP v.3.3.0 
-- ESPping v.1.0.5 
+* Async TCP 3.4.7 
+* Adafruit BusIO 1.17.2 
+* DNSServer 3.3.0 
+* ESP Async WebServer 3.8.0 
+* ESP32 Async UDP 3.3.0 
+* ESPping 1.0.5 
+* FS 3.3.0 
+* HTTPClient 3.3.0 
+* NetworkClientSecure 3.3.0 
+* Networking 3.3.0 
+* Preferences 3.3.0 
+* RTClib 2.1.4 
+* SimpleFSM 1.3.1 
+* SPI 3.3.0 
+* WiFi 3.3.0 
+* Wire 3.3.0 

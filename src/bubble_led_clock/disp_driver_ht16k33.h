@@ -2,8 +2,6 @@
 #define DISP_DRIVER_HT16K33_H
 
 #include "i_display_driver.h"
-#include <Adafruit_GFX.h>
-#include "Adafruit_LEDBackpack.h"
 
 class DispDriverHT16K33 : public IDisplayDriver {
 public:
