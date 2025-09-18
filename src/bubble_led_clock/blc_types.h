@@ -8,6 +8,7 @@ enum AnimationType {
 };
 
 struct DisplayScene {
+  const char* scene_name;
   const char* format_string;
   AnimationType animation_type;
   bool dots_with_previous;

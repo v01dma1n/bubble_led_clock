@@ -15,58 +15,52 @@ BubbleLedClockApp::BubbleLedClockApp() :
     _rtcActive = false;
 }
  
-// In file: blc_app.cpp
+#define DOUBLE_RESET_WINDOW_S 5 // 5-second window for double reset
 
 void BubbleLedClockApp::setup() {
+    LOGMSG(APP_LOG_INFO, "--- APP SETUP BEGIN ---");
+
     _appPrefs.setup();
     _appPrefs.getPreferences();
-    _displayManager.begin();
-    
+
     LOGMSG(APP_LOG_INFO, "BubbleLedClockApp::setup()");
 
-    Preferences ap_prefs;
+    _appPrefs.dumpPreferences();
+
+     if (!_rtc.begin()) {
+        LOGMSG(APP_LOG_ERROR, "Couldn't find RTC module!");
+        _rtcActive = false;
+    } else {
+        LOGMSG(APP_LOG_INFO, "RTC module found.");
+        _rtcActive = true;
+    }
+
+    _displayManager.begin();
+
+     Preferences ap_prefs;
     ap_prefs.begin("ap_mode_check", false);
     
-    bool force_ap = ap_prefs.getBool("force_ap", false);
+    // Use the RTC's unix timestamp, which survives reboots
+    uint32_t last_boot_time_s = ap_prefs.getUInt("last_boot_s", 0);
+    uint32_t current_boot_time_s = _rtcActive ? _rtc.now().unixtime() : 0;
+    
+    ap_prefs.putUInt("last_boot_s", current_boot_time_s);
+    ap_prefs.end();
 
-    if (force_ap) {
+    if (_rtcActive && last_boot_time_s > 0 && (current_boot_time_s - last_boot_time_s) < DOUBLE_RESET_WINDOW_S) {
         // --- Double Reset Path ---
-        // A recent reboot was detected. Clear the flag and enter AP mode.
         LOGMSG(APP_LOG_INFO, "Double reset detected. Forcing AP mode.");
-        ap_prefs.putBool("force_ap", false);
-        ap_prefs.end();
-
-        setupAP(AP_HOST_NAME);
-        String apMsgStr = "AP MODE -- CONNECT TO ";
-        apMsgStr += AP_HOST_NAME;
-        auto apMessage = std::make_unique<ScrollingTextAnimation>(apMsgStr.c_str());
-        _displayManager.setAnimation(std::move(apMessage));
-
-        // This blocking loop runs the Access Point until the device is rebooted.
-        while (true) {
-            getDisplay().print("AP MODE");  
-            _displayManager.update();
-            processAPInput();
-            delay(10);
-        }
-
-    } else {
-        // --- Normal Boot Path ---
-        // Set the flag to true for the 3-second window.
-        ap_prefs.putBool("force_ap", true);
-        ap_prefs.end();
-        delay(3000); // 3-second window for the user to perform a reset
-
-        // If we get here, it was a normal boot. Clear the flag and continue.
-        // This is the crucial change: this code now runs *inside* the else block.
-        ap_prefs.putBool("force_ap", false);
-        ap_prefs.end();
+        ap_prefs.remove("last_boot_s"); // Clear the key
+        
+        activateAccessPoint(); // This function will loop forever until reboot.
     }
+    
+    LOGMSG(APP_LOG_INFO, "Normal boot detected.");
     
     // --- Normal startup sequence continues from here ---
     std::string message = std::string(APP_NAME) + " v" + VERSION_STRING + 
                           " by " + std::string(APP_AUTHOR) + 
-                          " (" + std::string(APP_DATE) + "). " +
+                          " " + std::string(APP_DATE) + ". " +
                           std::string(APP_MESSAGE);
 
     auto startupMsg = std::make_unique<ScrollingTextAnimation>(message);
@@ -90,7 +84,7 @@ void BubbleLedClockApp::setup() {
     _fsmManager->setup();
     _sceneManager->setup();
     
-    LOGMSG(APP_LOG_INFO, "--- SETUP COMPLETE ---");
+    LOGMSG(APP_LOG_INFO, "--- APP SETUP COMPLETE ---");
 }
 
 void BubbleLedClockApp::loop() {
@@ -99,6 +93,42 @@ void BubbleLedClockApp::loop() {
     _fsmManager->update();
     _sceneManager->update();
     _displayManager.update();
+}
+
+void BubbleLedClockApp::activateAccessPoint()
+{
+    setupAP(AP_HOST_NAME);
+
+    enum ApDisplayState { WAITING_FOR_CLIENT, CLIENT_CONNECTED };
+    ApDisplayState apState = WAITING_FOR_CLIENT;
+    g_isClientConnected = false; // Ensure flag is reset before starting
+
+    String waitingMsgStr = "AP MODE -- CONNECT TO ";
+    waitingMsgStr += AP_HOST_NAME;
+    waitingMsgStr += " Wi-Fi";
+    auto apMessage = std::make_unique<ScrollingTextAnimation>(waitingMsgStr.c_str());
+    _displayManager.setAnimation(std::move(apMessage));
+
+    // This blocking loop runs the Access Point until the device is rebooted.
+    while (true) {
+
+      if (apState == WAITING_FOR_CLIENT && g_isClientConnected) {
+            // A client has connected, change the message
+            apState = CLIENT_CONNECTED;
+            auto connectedAnimation = std::make_unique<ScrollingTextAnimation>("CONNECTED -- PENDING SETUP...");
+            _displayManager.setAnimation(std::move(connectedAnimation));
+
+        } else if (apState == CLIENT_CONNECTED && !g_isClientConnected) {
+            // The client has disconnected, go back to the waiting message
+            apState = WAITING_FOR_CLIENT;
+            auto waitingAnimationRetry = std::make_unique<ScrollingTextAnimation>(waitingMsgStr.c_str());
+            _displayManager.setAnimation(std::move(waitingAnimationRetry));
+        }          
+        _displayManager.update();
+        processAPInput();
+        delay(10);
+    }
+
 }
 
 float BubbleLedClockApp::getTempData() { return _currentWeatherData.temperatureF; }
@@ -111,3 +141,4 @@ void BubbleLedClockApp::formatTime(char *txt, unsigned txt_size, const char *for
         txt[0] = ' ';
     }
 }
+

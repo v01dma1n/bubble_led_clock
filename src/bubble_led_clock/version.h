@@ -1,12 +1,12 @@
 #define APP_NAME "Bubble LED Clock"
 #define APP_AUTHOR "v01dma1n"
-#define APP_DATE "2025-09-17"
+#define APP_DATE "2025-09-18"
 
 #define VER_MAJOR 1
-#define VER_MINOR 4
+#define VER_MINOR 5
 #define VER_BUILD 0
 
-#define APP_MESSAGE "The clock connects to NTP Server. Double-press Reset for Access Point."
+#define APP_MESSAGE "The clock connects to WiFi. Double-press Reset for Access Point."
 
 #include <string>
 
@@ -27,14 +27,19 @@
   #issue005 The time is incorrect when clock starts withoug WiFi.
   It looks like the RTC time does not consider the TZ 
 
-  #issue006 The scrolling animation leaves the last character 
-  At the end of the animation, the last character does not disappear
-
   #issue008 ...
 
 */
 
 /* Version history
+
+2025-09-18 v.1.5 Time is displayed now between temperature and humidity
+- added time scene between temperature and humidity
+- changed the date animation to matrix
+- removed Adafruit Backpack library
+- double-reset for AP is now time based
+- the preference saving now is forced by .end() method all
+
 
 2025-09-17 v.1.4 Access Point on Boot Press
 - #issue001 No way to start AP if WiFi is accessible

@@ -2,7 +2,9 @@
 3d.local/
 fsm/
 photos.local/
+src/bubble_led_clock.compare
+src/i2c_scanner
 *~
 *.gcode
 *.src
-
+*.init

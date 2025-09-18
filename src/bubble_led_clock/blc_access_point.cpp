@@ -12,10 +12,22 @@
 #include <DNSServer.h>
 #include <WiFi.h>
 #include <stdexcept>
-
+#include <Arduino.h>
 
 DNSServer *dnsServer;
 AsyncWebServer *server;
+
+volatile bool g_isClientConnected;
+
+void onWifiEvent(WiFiEvent_t event) {
+    if (event == ARDUINO_EVENT_WIFI_AP_STACONNECTED) {
+        LOGMSG(APP_LOG_INFO, "Wi-Fi client connected to AP.");
+        g_isClientConnected = true;
+    } else if (event == ARDUINO_EVENT_WIFI_AP_STADISCONNECTED) {
+        LOGMSG(APP_LOG_INFO, "Wi-Fi client disconnected from AP.");
+        g_isClientConnected = false;
+    }
+}
 
 // Define an array of form fields
 FormField formFields[NUM_FORM_FIELDS];
@@ -363,6 +375,14 @@ void setupServer() {
       for (FormField &field : formFields) {
         if (request->hasParam(field.name)) {
           String val = request->getParam(field.name)->value();
+
+          if (field.isMasked) {
+            // For masked fields, if the submitted value is empty OR it's our placeholder,
+            // it means the user did not want to change it. So, we skip the update.
+            if (val.isEmpty() || val == PASSWORD_MASKED) {
+                continue; 
+            }
+          }
           field.value = val;
           field.received = true;
         }
@@ -384,6 +404,7 @@ void setupAP(const char *hostName) {
   initializeFormFields();
 
   LOGMSG(APP_LOG_INFO,"Setting up AP Mode");
+  WiFi.onEvent(onWifiEvent);
   WiFi.mode(WIFI_AP);
   LOGMSG(APP_LOG_INFO,"Host: %s", hostName);
   WiFi.softAP(hostName);

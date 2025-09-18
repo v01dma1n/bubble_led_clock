@@ -15,10 +15,10 @@
 #define APP_PREF_OWM_STATE_CODE "owm_state"
 #define APP_PREF_OWM_COUNTRY_CODE "owm_country"
 
-// AppPreferences appPrefs{};
+#define PREF_NAMESPACE "config"
 
 void AppPreferences::setup() {
-  prefs.begin("config");
+  prefs.begin(PREF_NAMESPACE);
   getPreferences();
 }
 
@@ -69,15 +69,17 @@ void AppPreferences::putPreferences() {
   prefs.putString(APP_PREF_OWM_CITY, config.owm_city);
   prefs.putString(APP_PREF_OWM_STATE_CODE, config.owm_state_code);
   prefs.putString(APP_PREF_OWM_COUNTRY_CODE, config.owm_country_code);
+  prefs.end(); // close the connection to the storage namespace 
+  prefs.begin(PREF_NAMESPACE); // and open it for the next access
 }
 
 void AppPreferences::dumpPreferences() {
-  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_WIFI_SSID, config.ssid);
-  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_PASSWORD, "***");
-  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_TIME_ZONE, config.time_zone);
-  LOGMSG(APP_LOG_DEBUG, "%s: %d", APP_PREF_LOG_LEVEL, config.logLevel);
-  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_OWM_CITY, config.owm_city);
-  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_OWM_STATE_CODE, config.owm_state_code);
-  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_OWM_COUNTRY_CODE, config.owm_country_code);
-  LOGMSG(APP_LOG_DEBUG, "%s: %s", APP_PREF_OWM_API_KEY, "***"); 
+  LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_WIFI_SSID, config.ssid);
+  LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_PASSWORD, "***");
+  LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_TIME_ZONE, config.time_zone);
+  LOGMSG(APP_LOG_DEBUG, "Pref=%s: %d", APP_PREF_LOG_LEVEL, config.logLevel);
+  LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_OWM_CITY, config.owm_city);
+  LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_OWM_STATE_CODE, config.owm_state_code);
+  LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_OWM_COUNTRY_CODE, config.owm_country_code);
+  LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_OWM_API_KEY, "***"); 
 }

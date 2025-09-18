@@ -15,7 +15,7 @@ public:
     bool isInState(const String& stateName) const; 
 
     void on_enter_wifi_connect();
-    void on_enter_ntp_sync();
+    void on_enter_ntp_sync(); 
     void on_exit_ntp_sync();
     void on_enter_ap_mode();
     void on_exit_ap_mode();

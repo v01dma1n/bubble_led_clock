@@ -6,6 +6,8 @@
 #include <Arduino.h>
 #include <cstdint>
 
+extern volatile bool g_isClientConnected;
+
 #define DNS_SERVER_PORT 53
 
 enum FormFieldIndex {

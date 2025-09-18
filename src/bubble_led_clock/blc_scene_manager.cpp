@@ -24,11 +24,12 @@ SceneManager::SceneManager(BubbleLedClockApp& app) : _app(app) {}
 
 void SceneManager::setup() {
     static const DisplayScene scenePlaylist[] = {
-      { "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
-      { "%b %d",    SLOT_MACHINE, true,  10000, 200, 50, BubbleLedClockApp_getTimeData },
-      { "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
-      { "%3.0f F",  MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getTempData },
-      { "%3.0f PCT",MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getHumidityData }
+      { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
+      { "Date",        "%b %d",    MATRIX,       true,  10000, 200, 40, BubbleLedClockApp_getTimeData },
+      { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
+      { "Temperature", "%3.0f F",  MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getTempData },
+      { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
+      { "Humidity",    "%3.0f PCT",MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getHumidityData }
     };
     _scenePlaylist = scenePlaylist;
     _numScenes = sizeof(scenePlaylist) / sizeof(DisplayScene);
@@ -77,6 +78,8 @@ void SceneManager::update() {
                 strncpy(buffer, "NO DATA", sizeof(buffer));
             }
         }
+
+        LOGDBG("Scene: %s - %s", newScene.scene_name, buffer);
 
         if (newScene.animation_type == SLOT_MACHINE) {
             auto anim = std::make_unique<SlotMachineAnimation>(buffer, newScene.anim_param_1, 2000, newScene.anim_param_2, newScene.dots_with_previous);

@@ -7,7 +7,6 @@ SemaphoreHandle_t serialMutex = NULL;
 BubbleLedClockApp& app = BubbleLedClockApp::getInstance();
 
 void setup() {
-  
   Serial.begin(115200);
   delay(200);
   Serial.println("\nStarting...");
@@ -15,12 +14,10 @@ void setup() {
   // Create the mutex before any other tasks might use it
   serialMutex = xSemaphoreCreateMutex();
 
+// for final build this should be commented out
+// #include "../blc_preferences.init"
+
   app.setup();
-
-  app.getPrefs().dumpPreferences();
-
-  snprintf(app.getPrefs().config.owm_api_key, MAX_PREF_STRING_LEN, "6639678a4c920f9349923ff9467d7747");
-  app.getPrefs().putPreferences();
 
   Serial.println("\n... setup complete");
 }

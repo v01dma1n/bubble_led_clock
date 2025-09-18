@@ -42,6 +42,8 @@ public:
 private:
     BubbleLedClockApp();
 
+    void activateAccessPoint();
+    
     // Core hardware components
     DispDriverHT16K33 _display;
     DisplayManager _displayManager;

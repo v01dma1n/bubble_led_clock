@@ -34,7 +34,6 @@ DispDriverHT16K33::DispDriverHT16K33(uint8_t i2c_addr, int displaySize)
 }
 
 void DispDriverHT16K33::begin() {
-    Wire.begin();
     // Turn on the oscillator
     Wire.beginTransmission(_i2c_addr);
     Wire.write(HT16K33_CMD_OSCILLATOR_ON);
