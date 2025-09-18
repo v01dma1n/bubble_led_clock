@@ -9,7 +9,7 @@
 * Ximimark I2C RTC DS1307
   * https://www.amazon.com/Ximimark-DS1307-AT24C32-Module-Arduino
 * Adafruit HT16K33 Breakout
-  *https://www.adafruit.com/product/1427
+  * https://www.adafruit.com/product/1427
 
 ## Libraries
 - ESP32Logger2 v.1.0.3 
