@@ -14,9 +14,6 @@ void setup() {
   // Create the mutex before any other tasks might use it
   serialMutex = xSemaphoreCreateMutex();
 
-// for final build this should be commented out
-// #include "../blc_preferences.init"
-
   app.setup();
 
   Serial.println("\n... setup complete");

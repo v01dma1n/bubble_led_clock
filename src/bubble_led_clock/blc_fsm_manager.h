@@ -20,6 +20,7 @@ public:
     void on_enter_ap_mode();
     void on_exit_ap_mode();
     void on_enter_running_normal();
+    void on_enter_startup_anim(); 
 
     bool guard_wifi_connected();
     bool guard_wifi_timed_out();
@@ -27,6 +28,7 @@ public:
     bool guard_ntp_timeout_with_rtc();
     bool guard_ntp_timeout_no_rtc();
     bool guard_ap_timeout_with_rtc();
+    bool guard_anim_done();
 
 private:
     BubbleLedClockApp& _app; 

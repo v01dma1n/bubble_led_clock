@@ -14,6 +14,7 @@
 #define APP_PREF_OWM_CITY    "owm_city"
 #define APP_PREF_OWM_STATE_CODE "owm_state"
 #define APP_PREF_OWM_COUNTRY_CODE "owm_country"
+#define APP_PREF_TEMP_UNIT "temp_unit"
 
 #define PREF_NAMESPACE "config"
 
@@ -52,6 +53,12 @@ void AppPreferences::getPreferences() {
     strncpy(config.owm_country_code, "US", sizeof(config.owm_country_code));
   }
   
+  if (prefs.isKey(APP_PREF_TEMP_UNIT)) {
+    prefs.getString(APP_PREF_TEMP_UNIT, config.tempUnit, sizeof(config.tempUnit));
+  } else {
+    strncpy(config.tempUnit, "imperial", sizeof(config.tempUnit));
+  }  
+
   int32_t savedLogLevel = prefs.getInt(APP_PREF_LOG_LEVEL, APP_LOG_INFO);
   config.logLevel = static_cast<AppLogLevel>(savedLogLevel);
   if (config.logLevel < APP_LOG_ERROR)
@@ -69,6 +76,7 @@ void AppPreferences::putPreferences() {
   prefs.putString(APP_PREF_OWM_CITY, config.owm_city);
   prefs.putString(APP_PREF_OWM_STATE_CODE, config.owm_state_code);
   prefs.putString(APP_PREF_OWM_COUNTRY_CODE, config.owm_country_code);
+  prefs.putString(APP_PREF_TEMP_UNIT, config.tempUnit);
   prefs.end(); // close the connection to the storage namespace 
   prefs.begin(PREF_NAMESPACE); // and open it for the next access
 }
@@ -82,4 +90,5 @@ void AppPreferences::dumpPreferences() {
   LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_OWM_STATE_CODE, config.owm_state_code);
   LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_OWM_COUNTRY_CODE, config.owm_country_code);
   LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_OWM_API_KEY, "***"); 
+  LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_TEMP_UNIT, config.tempUnit);
 }

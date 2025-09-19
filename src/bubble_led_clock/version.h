@@ -1,9 +1,12 @@
+#ifndef VERSION_H
+#define VESTION_H
+
 #define APP_NAME "Bubble LED Clock"
 #define APP_AUTHOR "v01dma1n"
-#define APP_DATE "2025-09-18"
+#define APP_DATE "2025-09-19"
 
 #define VER_MAJOR 1
-#define VER_MINOR 5
+#define VER_MINOR 6
 #define VER_BUILD 0
 
 #define APP_MESSAGE "The clock connects to WiFi. Double-press Reset for Access Point."
@@ -27,11 +30,20 @@
   #issue005 The time is incorrect when clock starts withoug WiFi.
   It looks like the RTC time does not consider the TZ 
 
-  #issue008 ...
+  #issue008 OpenWeather API client is broken
+  https://api.openweathermap.org/data/2.5/weather?q=,NJ,US&appid=<removed>&units=imperial
+  16:29:08.084 -> HTTP GET request failed, error: 
+
+  #issue009 ...
 
 */
 
 /* Version history
+
+2025-09-18 v.1.6 OpenWeather Access Restored
+- fixed mismatch between non-secure client and https protocol in URL
+- Temperature in F or C selection in the Preferences
+- AP activation on double-reset press fixed
 
 2025-09-18 v.1.5 Time is displayed now between temperature and humidity
 - added time scene between temperature and humidity
@@ -39,7 +51,6 @@
 - removed Adafruit Backpack library
 - double-reset for AP is now time based
 - the preference saving now is forced by .end() method all
-
 
 2025-09-17 v.1.4 Access Point on Boot Press
 - #issue001 No way to start AP if WiFi is accessible
@@ -74,3 +85,6 @@
 
 /* ToDo
 */
+
+#endif // VERSION_H
+

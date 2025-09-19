@@ -19,6 +19,7 @@ enum FormFieldIndex {
   OWM_STATE_CODE,
   OWM_COUNTRY_CODE,
   OWM_API_KEY,
+  TEMP_UNITS,
   NUM_FORM_FIELDS
 };
 
@@ -30,7 +31,6 @@ enum PrefType {
   PREF_ENUM,
   PREF_SELECT
 };
-
 
 enum FieldValidation {
   VALIDATION_NONE,

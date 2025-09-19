@@ -7,8 +7,10 @@
 #include <IPAddress.h>
 #include <Preferences.h>
 
-#define PING_IP_COUNT 4
 #define MAX_PREF_STRING_LEN 64
+
+#define OWM_UNIT_IMPERIAL "imperial"
+#define OWM_UNIT_METRIC "metric"
 
 struct AppConfig {
   char ssid[MAX_PREF_STRING_LEN];
@@ -19,6 +21,7 @@ struct AppConfig {
   char owm_city[MAX_PREF_STRING_LEN];
   char owm_state_code[MAX_PREF_STRING_LEN];
   char owm_country_code[MAX_PREF_STRING_LEN];
+  char tempUnit[MAX_PREF_STRING_LEN];
 };
 
 class AppPreferences {

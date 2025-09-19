@@ -1,6 +1,5 @@
 #include "openweather_client.h"
 
-#define ESP32DEBUGGING
 #include "debug.h"
 #include "blc_app.h"
 #include "blc_preferences.h"
@@ -24,13 +23,14 @@ OpenWeatherData getOpenWeatherData() {
     String country = BubbleLedClockApp::getInstance().getPrefs().config.owm_country_code;
 
     // Build the API request URL from the config file
-    String url = "https://api.openweathermap.org/data/2.5/weather?q=";
+    String url = "http://api.openweathermap.org/data/2.5/weather?q=";
+    url += city; 
     if (state.length() > 0) { url += "," + state; }
     if (country.length() > 0) { url += "," + country; }
     url += "&appid=";
     url += BubbleLedClockApp::getInstance().getPrefs().config.owm_api_key;
     url += "&units=";
-    url += "imperial";
+    url += BubbleLedClockApp::getInstance().getPrefs().config.tempUnit;
 
     LOGMSG(APP_LOG_DEBUG, "Fetching weather from: %s", url.c_str());
     if (http.begin(client, url)) {
@@ -42,18 +42,17 @@ OpenWeatherData getOpenWeatherData() {
             int tempIndex = payload.indexOf("\"temp\":");
             int humidityIndex = payload.indexOf("\"humidity\":");
             if (tempIndex != -1 && humidityIndex != -1) {
-                // Find the end of the temperature value (the comma)
                 int commaIndex = payload.indexOf(',', tempIndex);
                 String tempStr = payload.substring(tempIndex + 7, commaIndex);
-                data.temperatureF = tempStr.toFloat();
+                data.temperatureF = tempStr.toFloat(); // <-- Store raw float
 
-                // Find the end of the humidity value (the closing brace)
                 int endIndex = payload.indexOf('}', humidityIndex);
                 String humidityStr = payload.substring(humidityIndex + 11, endIndex);
-                data.humidity = humidityStr.toFloat();
-                
+                data.humidity = humidityStr.toFloat(); // <-- Store raw float
+
                 data.isValid = true;
-                LOGMSG(APP_LOG_DEBUG, "Weather Parsed: %.1f F, %.0f%% Humidity", data.temperatureF, data.humidity);
+                LOGDBG("Weather Parsed: %.1f, %.0f%% Humidity", data.temperatureF, data.humidity);
+
             } else {
                 LOGMSG(APP_LOG_DEBUG, "Failed to parse weather JSON: %s", payload.c_str());
             }

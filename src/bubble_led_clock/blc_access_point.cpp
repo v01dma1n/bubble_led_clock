@@ -29,6 +29,11 @@ void onWifiEvent(WiFiEvent_t event) {
     }
 }
 
+static const PrefSelectOption tempUnitOptions[] = {
+    {"Fahrenheit (°F)", OWM_UNIT_IMPERIAL},
+    {"Celsius (°C)", OWM_UNIT_METRIC}
+};
+
 // Define an array of form fields
 FormField formFields[NUM_FORM_FIELDS];
 
@@ -101,6 +106,16 @@ void initializeFormFields() {
     formFields[OWM_COUNTRY_CODE].validation = VALIDATION_NONE;
     formFields[OWM_COUNTRY_CODE].prefType = PREF_STRING;
     formFields[OWM_COUNTRY_CODE].pref.str_pref = appPrefs.config.owm_country_code;
+
+    // --- TEMP_UNITS ---
+    formFields[TEMP_UNITS].id = "TempUnitsInput";
+    formFields[TEMP_UNITS].name = "Temperature Unit";
+    formFields[TEMP_UNITS].isMasked = false;
+    formFields[TEMP_UNITS].validation = VALIDATION_NONE;
+    formFields[TEMP_UNITS].prefType = PREF_SELECT;
+    formFields[TEMP_UNITS].pref.str_pref = appPrefs.config.tempUnit;
+    formFields[TEMP_UNITS].select_options = tempUnitOptions;
+    formFields[TEMP_UNITS].num_select_options = 2;    
 }
 
 #define PASSWORD_MASKED "************"
@@ -444,8 +459,10 @@ void processAPInput() {
         strncpy(field.pref.str_pref, field.value.c_str(),
                 MAX_PREF_STRING_LEN - 1);
         field.pref.str_pref[MAX_PREF_STRING_LEN - 1] = '\0';
+
       } else if (field.prefType == PREF_BOOL) {
         *(field.pref.bool_pref) = field.value == "on";
+
       } else if (field.prefType == PREF_INT) {
         try {
           *(field.pref.int_pref) = std::stoi(field.value.c_str());
@@ -460,6 +477,12 @@ void processAPInput() {
           *(field.pref.int_pref) = 0; // Set to default 0
           continue;
         } // try
+
+      } else if (field.prefType == PREF_SELECT) {
+        strncpy(field.pref.str_pref, field.value.c_str(),
+                MAX_PREF_STRING_LEN - 1);
+        field.pref.str_pref[MAX_PREF_STRING_LEN - 1] = '\0';      
+        
       } else if (field.prefType == PREF_ENUM) {
         try {
           LOGMSG(APP_LOG_DEBUG,"field.name: %s, field.value: %s", field.name,
@@ -477,6 +500,7 @@ void processAPInput() {
           *(field.pref.enum_pref) = APP_LOG_ERROR; // Set to default ERROR
           continue;
         } // try
+
       }
       field.received = false;
       restart = true;

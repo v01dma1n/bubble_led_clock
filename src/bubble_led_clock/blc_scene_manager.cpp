@@ -28,6 +28,7 @@ void SceneManager::setup() {
       { "Date",        "%b %d",    MATRIX,       true,  10000, 200, 40, BubbleLedClockApp_getTimeData },
       { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
       { "Temperature", "%3.0f F",  MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getTempData },
+      { "Temperature", "%3.0f C",  MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getTempData },
       { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
       { "Humidity",    "%3.0f PCT",MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getHumidityData }
     };
@@ -53,21 +54,37 @@ void SceneManager::update() {
 
     const DisplayScene& currentScene = _scenePlaylist[_currentSceneIndex];
     if (currentTime - _sceneStartTime >= currentScene.duration_ms) {
-        _currentSceneIndex = (_currentSceneIndex + 1) % _numScenes;
-        _sceneStartTime = currentTime;
+
+        int nextIndex = _currentSceneIndex;
+        String units = _app.getPrefs().config.tempUnit;
+        while (true) {
+            nextIndex = (nextIndex + 1) % _numScenes;
+            const DisplayScene& nextScene = _scenePlaylist[nextIndex];
+            
+            if (strcmp(nextScene.scene_name, "Temperature") == 0) {
+                bool isImperialScene = (strstr(nextScene.format_string, "F") != nullptr);
+                if ((units == OWM_UNIT_IMPERIAL && isImperialScene) || (units == OWM_UNIT_METRIC && !isImperialScene)) {
+                    break; // This is the correct scene, break the loop.
+                }
+            } else {
+                break; // Not a temperature scene, so it's a valid next scene.
+            }
+        }
+        _currentSceneIndex = nextIndex;
+        _sceneStartTime = millis();
+
         const DisplayScene& newScene = _scenePlaylist[_currentSceneIndex];
 
         if (newScene.getDataValue == BubbleLedClockApp_getTempData || newScene.getDataValue == BubbleLedClockApp_getHumidityData) {
             if (!_currentWeatherData.isValid || (millis() - _lastWeatherFetchTime >= _weatherFetchInterval)) {
                 _lastWeatherFetchTime = millis();
                 _currentWeatherData = getOpenWeatherData();
-                _app.setWeatherData(_currentWeatherData); // Update the main app's copy
+                _app.setWeatherData(_currentWeatherData);
             }
         }
 
         char buffer[12];
         time_t now = _app.isRtcActive() ? _app.getRtc().now().unixtime() : time(0);
-
         if (newScene.getDataValue == BubbleLedClockApp_getTimeData) {
             _app.formatTime(buffer, sizeof(buffer), newScene.format_string, now);
         } else {
