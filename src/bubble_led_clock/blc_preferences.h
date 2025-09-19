@@ -17,6 +17,8 @@ struct AppConfig {
   char password[MAX_PREF_STRING_LEN];
   char time_zone[MAX_PREF_STRING_LEN];
   AppLogLevel logLevel;
+  
+  bool showStartupAnimation;
   char owm_api_key[MAX_PREF_STRING_LEN];
   char owm_city[MAX_PREF_STRING_LEN];
   char owm_state_code[MAX_PREF_STRING_LEN];

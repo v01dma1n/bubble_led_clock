@@ -75,6 +75,14 @@ void initializeFormFields() {
     formFields[LOG_LEVEL].prefType = PREF_ENUM;
     formFields[LOG_LEVEL].pref.enum_pref = &appPrefs.config.logLevel;
 
+    // -- SHOW_STARTUP_ANIMATION -- 
+    formFields[SHOW_STARTUP_ANIM].id = "ShowStartupAnimInput";
+    formFields[SHOW_STARTUP_ANIM].name = "Show Startup Animation";
+    formFields[SHOW_STARTUP_ANIM].isMasked = false;
+    formFields[SHOW_STARTUP_ANIM].validation = VALIDATION_NONE;
+    formFields[SHOW_STARTUP_ANIM].prefType = PREF_BOOL;
+    formFields[SHOW_STARTUP_ANIM].pref.bool_pref = &appPrefs.config.showStartupAnimation;
+
     // --- OWM_CITY ---
     formFields[OWM_CITY].id = "OwmCityInput";
     formFields[OWM_CITY].name = "OWM City";
@@ -357,6 +365,120 @@ void sendHtmlPage(AsyncWebServerRequest *request) {
 }
 
 void setupServer() {
+  server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    LOGMSG(APP_LOG_INFO,".");
+    sendHtmlPage(request);
+    LOGMSG(APP_LOG_DEBUG,"Client Connected");
+  });
+  
+  server->on("/get", HTTP_GET, [](AsyncWebServerRequest *request) {
+    LOGMSG(APP_LOG_INFO, "Received new settings via AP.");
+    AppPreferences& appPrefs = BubbleLedClockApp::getInstance().getPrefs();
+    bool restart = false;
+
+    for (FormField &field : formFields) {
+        if (field.prefType == PREF_BOOL) {
+            // For checkboxes, if param is missing, it's false.
+            bool isChecked = request->hasParam(field.name);
+            *(field.pref.bool_pref) = isChecked;
+            LOGMSG(APP_LOG_DEBUG, "Saving bool '%s' = %s", field.name, isChecked ? "true" : "false");
+            restart = true;
+        } else {
+            // For all other types, only process if the parameter was sent.
+            if (request->hasParam(field.name)) {
+                String val = request->getParam(field.name)->value();
+                
+                if (field.isMasked && (val.isEmpty() || val == PASSWORD_MASKED)) {
+                    continue; // Skip empty/placeholder password fields
+                }
+                
+                // Save the new value directly to the preferences object
+                if (field.prefType == PREF_STRING || field.prefType == PREF_SELECT) {
+                    strncpy(field.pref.str_pref, val.c_str(), MAX_PREF_STRING_LEN - 1);
+                    field.pref.str_pref[MAX_PREF_STRING_LEN - 1] = '\0';
+                } else if (field.prefType == PREF_ENUM) {
+                    *(field.pref.enum_pref) = static_cast<AppLogLevel>(val.toInt());
+                }
+                LOGMSG(APP_LOG_DEBUG, "Saving field '%s' = %s", field.name, val.c_str());
+                restart = true;
+            }
+        }
+    }
+
+    if (restart) {
+        LOGMSG(APP_LOG_INFO, "Settings saved. Restarting device.");
+        appPrefs.putPreferences();
+        delay(200);
+        ESP.restart();
+    }
+
+    // Send a confirmation page to the user
+    request->send(200, "text/html", "Settings saved. The device will now restart.");
+  });
+}
+
+/*
+void setupServer() {
+  server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    LOGMSG(APP_LOG_INFO,".");
+    sendHtmlPage(request);
+    LOGMSG(APP_LOG_DEBUG,"Client Connected");
+  });
+  
+  server->on("/get", HTTP_GET, [](AsyncWebServerRequest *request) {
+    String inputMessage;
+    String inputParam;
+    char msg[150]{};
+    bool valid = true;
+
+    // --- Validation block (unchanged) ---
+    for (FormField &field : formFields) {
+      if (request->hasParam(field.name)) {
+        String val = request->getParam(field.name)->value();
+        if (!validateInput(val, field.validation)) {
+          snprintf(msg, sizeof(msg),
+                   "Validation failed for field %s and value '%s'.",
+                   field.name, val.c_str());
+          LOGMSG(APP_LOG_ERROR,"%s", msg);
+          valid = false;
+          break;
+        }
+      }
+    }
+
+    if (valid) {
+      for (FormField &field : formFields) {
+        if (field.prefType == PREF_BOOL) {
+            field.value = request->hasParam(field.name) ? "on" : "off";
+            field.received = true;
+            // --- ADDED DIAGNOSTIC LOG ---
+            LOGMSG(APP_LOG_DEBUG, "HANDLER: Field '%s' was %s. Set received value to '%s'.", field.name, request->hasParam(field.name) ? "present" : "absent", field.value.c_str());
+        } else {
+            if (request->hasParam(field.name)) {
+              String val = request->getParam(field.name)->value();
+              if (field.isMasked) {
+                if (val.isEmpty() || val == PASSWORD_MASKED) {
+                    continue;
+                }
+              }
+              field.value = val;
+              field.received = true;
+            }
+        }
+      }
+    }
+
+    if (strlen(msg) == 0) {
+      snprintf(msg, sizeof(msg),
+               "Settings saved. Device is restarting.<br><a href=\"/\">Return to Home Page</a>\n");
+      processAPInput();
+    }
+    request->send(200, "text/html", msg);
+  });
+}
+*/
+/*
+void setupServer() {
 
   server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     LOGMSG(APP_LOG_INFO,".");
@@ -387,21 +509,27 @@ void setupServer() {
     }
 
     if (valid) {
-      for (FormField &field : formFields) {
-        if (request->hasParam(field.name)) {
-          String val = request->getParam(field.name)->value();
+        for (FormField &field : formFields) {
+            if (field.prefType == PREF_BOOL) {
+                // For checkboxes, we always process them. If the parameter exists, it was
+                // checked ("on"). If it doesn't exist, it was unchecked ("off").
+                field.value = request->hasParam(field.name) ? "on" : "off";
+                field.received = true;
+            } else {
+                // Standard handling for all other input types
+                if (request->hasParam(field.name)) {
+                  String val = request->getParam(field.name)->value();
 
-          if (field.isMasked) {
-            // For masked fields, if the submitted value is empty OR it's our placeholder,
-            // it means the user did not want to change it. So, we skip the update.
-            if (val.isEmpty() || val == PASSWORD_MASKED) {
-                continue; 
-            }
-          }
-          field.value = val;
-          field.received = true;
+                  if (field.isMasked) {
+                    if (val.isEmpty() || val == PASSWORD_MASKED) {
+                        continue;
+                    }
+                  }
+                  field.value = val;
+                  field.received = true;
+                }
+            }      
         }
-      }
     }
 
     if (strlen(msg) == 0) {
@@ -413,6 +541,7 @@ void setupServer() {
     request->send(200, "text/html", msg);
   });
 }
+*/
 
 void setupAP(const char *hostName) {
   
@@ -448,6 +577,71 @@ void setupAP(const char *hostName) {
 
 using namespace std;
 
+void processAPInput() {
+  bool restart{false};
+
+  dnsServer->processNextRequest();
+  for (FormField &field : formFields) {
+    if (field.received) {
+      if (field.prefType == PREF_STRING) {
+        strncpy(field.pref.str_pref, field.value.c_str(),
+                MAX_PREF_STRING_LEN - 1);
+        field.pref.str_pref[MAX_PREF_STRING_LEN - 1] = '\0';
+
+      } else if (field.prefType == PREF_BOOL) {
+        *(field.pref.bool_pref) = field.value == "on";
+      } else if (field.prefType == PREF_INT) {
+        try {
+          *(field.pref.int_pref) = std::stoi(field.value.c_str());
+        } catch (const std::invalid_argument &e) {
+          LOGMSG(APP_LOG_ERROR,"Invalid integer value for field %s: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.int_pref) = 0; // Set to default 0
+          continue;
+        } catch (const std::out_of_range &e) {
+          LOGMSG(APP_LOG_ERROR,"Integer value out of range for field %s: %s",
+                 field.name, field.value.c_str());
+          *(field.pref.int_pref) = 0; // Set to default 0
+          continue;
+        } // try
+
+      } else if (field.prefType == PREF_SELECT) {
+        strncpy(field.pref.str_pref, field.value.c_str(),
+                MAX_PREF_STRING_LEN - 1);
+        field.pref.str_pref[MAX_PREF_STRING_LEN - 1] = '\0';      
+        
+      } else if (field.prefType == PREF_ENUM) {
+        try {
+          LOGMSG(APP_LOG_DEBUG,"field.name: %s, field.value: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.enum_pref) =
+              static_cast<AppLogLevel>(std::stoi(field.value.c_str()));
+        } catch (const std::invalid_argument &e) {
+          LOGMSG(APP_LOG_ERROR,"Invalid enum value for field %s: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.enum_pref) = APP_LOG_ERROR; // Set to default ERROR
+          continue;
+        } catch (const std::out_of_range &e) {
+          LOGMSG(APP_LOG_ERROR,"Enum value out of range for field %s: %s", field.name,
+                 field.value.c_str());
+          *(field.pref.enum_pref) = APP_LOG_ERROR; // Set to default ERROR
+          continue;
+        } // try
+
+      }
+      field.received = false;
+      restart = true;
+    }
+  }
+  if (restart) {
+    LOGMSG(APP_LOG_DEBUG,"AP Restarting");
+    BubbleLedClockApp::getInstance().getPrefs().putPreferences();
+    delay(100);
+    ESP.restart();
+  }
+}
+
+/*
 void processAPInput() {
   bool restart{false};
 
@@ -513,7 +707,7 @@ void processAPInput() {
     ESP.restart();
   }
 }
-
+*/
 unsigned long apBootMillis = millis();
 
 void loopAP(unsigned long apRebootTimeMillis) {

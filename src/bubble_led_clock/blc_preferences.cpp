@@ -1,4 +1,3 @@
-// #define DBGLOGENABLED
 #include "debug.h"
 #include "blc_preferences.h"
 
@@ -10,6 +9,7 @@
 #define APP_PREF_PASSWORD "password"
 #define APP_PREF_TIME_ZONE "time_zone"
 #define APP_PREF_LOG_LEVEL "log_level"
+#define APP_PREF_SHOW_STARTUP_ANIM "startup_anim"
 #define APP_PREF_OWM_API_KEY "owm_api_key"
 #define APP_PREF_OWM_CITY    "owm_city"
 #define APP_PREF_OWM_STATE_CODE "owm_state"
@@ -33,6 +33,16 @@ void AppPreferences::getPreferences() {
   } else {
     strncpy(config.time_zone, "EST5EDT,M3.2.0,M11.1.0", sizeof(config.time_zone));
   }
+
+  int32_t savedLogLevel = prefs.getInt(APP_PREF_LOG_LEVEL, APP_LOG_INFO);
+  config.logLevel = static_cast<AppLogLevel>(savedLogLevel);
+  if (config.logLevel < APP_LOG_ERROR)
+    config.logLevel = APP_LOG_ERROR;
+  else if (config.logLevel > APP_LOG_DEBUG)
+    config.logLevel = APP_LOG_DEBUG;
+
+  config.showStartupAnimation = prefs.getBool(APP_PREF_SHOW_STARTUP_ANIM, true); 
+
   prefs.getString(APP_PREF_OWM_API_KEY, config.owm_api_key, sizeof(config.owm_api_key));
 
   if (prefs.isKey(APP_PREF_OWM_CITY)) {
@@ -58,27 +68,22 @@ void AppPreferences::getPreferences() {
   } else {
     strncpy(config.tempUnit, "imperial", sizeof(config.tempUnit));
   }  
-
-  int32_t savedLogLevel = prefs.getInt(APP_PREF_LOG_LEVEL, APP_LOG_INFO);
-  config.logLevel = static_cast<AppLogLevel>(savedLogLevel);
-  if (config.logLevel < APP_LOG_ERROR)
-    config.logLevel = APP_LOG_ERROR;
-  else if (config.logLevel > APP_LOG_DEBUG)
-    config.logLevel = APP_LOG_DEBUG;
+ 
 }
 
 void AppPreferences::putPreferences() {
+  prefs.clear(); // Clear the entire namespace first to ensure a clean write 
   prefs.putString(APP_PREF_WIFI_SSID, config.ssid);
   prefs.putString(APP_PREF_PASSWORD, config.password);
   prefs.putString(APP_PREF_TIME_ZONE, config.time_zone);
   prefs.putInt(APP_PREF_LOG_LEVEL, config.logLevel);
+  prefs.putBool(APP_PREF_SHOW_STARTUP_ANIM, config.showStartupAnimation);
   prefs.putString(APP_PREF_OWM_API_KEY, config.owm_api_key);
   prefs.putString(APP_PREF_OWM_CITY, config.owm_city);
   prefs.putString(APP_PREF_OWM_STATE_CODE, config.owm_state_code);
   prefs.putString(APP_PREF_OWM_COUNTRY_CODE, config.owm_country_code);
   prefs.putString(APP_PREF_TEMP_UNIT, config.tempUnit);
   prefs.end(); // close the connection to the storage namespace 
-  prefs.begin(PREF_NAMESPACE); // and open it for the next access
 }
 
 void AppPreferences::dumpPreferences() {
@@ -86,6 +91,7 @@ void AppPreferences::dumpPreferences() {
   LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_PASSWORD, "***");
   LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_TIME_ZONE, config.time_zone);
   LOGMSG(APP_LOG_DEBUG, "Pref=%s: %d", APP_PREF_LOG_LEVEL, config.logLevel);
+  LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_SHOW_STARTUP_ANIM, config.showStartupAnimation ? "Yes" : "No");
   LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_OWM_CITY, config.owm_city);
   LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_OWM_STATE_CODE, config.owm_state_code);
   LOGMSG(APP_LOG_DEBUG, "Pref=%s: %s", APP_PREF_OWM_COUNTRY_CODE, config.owm_country_code);

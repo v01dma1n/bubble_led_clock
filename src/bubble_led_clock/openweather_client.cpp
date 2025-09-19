@@ -12,10 +12,10 @@
 
 OpenWeatherData getOpenWeatherData() {
     OpenWeatherData data;
-    HTTPClient http;
+    static HTTPClient http;
     // WiFiClientSecure client;
     // client.setInsecure(); // Bypass SSL certificate validation for simplicity
-    WiFiClient client;
+    static WiFiClient client;
 
     String city = BubbleLedClockApp::getInstance().getPrefs().config.owm_city;
     city.replace(" ", "%20"); // the spaces in the cities mess up the URL
@@ -37,27 +37,28 @@ OpenWeatherData getOpenWeatherData() {
         http.setTimeout(15000); // 15-second timeout
         int httpCode = http.GET();
 
+        String payload = http.getString();
+
         if (httpCode == HTTP_CODE_OK) {
-            String payload = http.getString();
             int tempIndex = payload.indexOf("\"temp\":");
             int humidityIndex = payload.indexOf("\"humidity\":");
             if (tempIndex != -1 && humidityIndex != -1) {
                 int commaIndex = payload.indexOf(',', tempIndex);
                 String tempStr = payload.substring(tempIndex + 7, commaIndex);
-                data.temperatureF = tempStr.toFloat(); // <-- Store raw float
+                data.temperatureF = tempStr.toFloat();
 
                 int endIndex = payload.indexOf('}', humidityIndex);
                 String humidityStr = payload.substring(humidityIndex + 11, endIndex);
-                data.humidity = humidityStr.toFloat(); // <-- Store raw float
+                data.humidity = humidityStr.toFloat();
 
                 data.isValid = true;
                 LOGDBG("Weather Parsed: %.1f, %.0f%% Humidity", data.temperatureF, data.humidity);
-
             } else {
-                LOGMSG(APP_LOG_DEBUG, "Failed to parse weather JSON: %s", payload.c_str());
+                LOGMSG(APP_LOG_ERROR, "Failed to parse weather JSON: %s", payload.c_str());
             }
         } else {
-            LOGMSG(APP_LOG_ERROR, "HTTP GET request failed, error: %s %s", http.errorToString(httpCode).c_str(), http.errorToString(httpCode).c_str());
+            // The new error log also includes the payload, which is more helpful for debugging.
+            LOGMSG(APP_LOG_ERROR, "HTTP GET request failed, code: %d, response: %s", httpCode, payload.c_str());
         }
         http.end();
     } else {

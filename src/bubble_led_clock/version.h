@@ -13,9 +13,8 @@
 
 #include <string>
 
-#define VERSION_STRING                                                         \
-  (std::to_string(VER_MAJOR) + "." + std::to_string(VER_MINOR) + "." +         \
-   std::to_string(VER_BUILD))
+#define VERSION_STRING \
+  (std::to_string(VER_MAJOR) + "." + std::to_string(VER_MINOR) + "." + std::to_string(VER_BUILD))
 
 /* Known Problems
 
@@ -42,7 +41,8 @@
 
 2025-09-18 v.1.7.1 
 - dots with previous character added to the scrolling animation
-
+- enable/disable startup message (note: preference keys must be less then or equal 15 chars)
+- boolean config in captive portal fixed for unchecked checkboxes
 
 2025-09-18 v.1.6 OpenWeather Access Restored
 - fixed mismatch between non-secure client and https protocol in URL
@@ -90,5 +90,4 @@
 /* ToDo
 */
 
-#endif // VERSION_H
-
+#endif  // VERSION_H
