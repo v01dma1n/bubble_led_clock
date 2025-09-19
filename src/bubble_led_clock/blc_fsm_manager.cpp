@@ -95,10 +95,10 @@ void BlcFsmManager::on_enter_running_normal() {
 void BlcFsmManager::on_enter_startup_anim() {
     std::string message = std::string(APP_NAME) + " v" + VERSION_STRING + 
                           " by " + std::string(APP_AUTHOR) + 
-                          " (" + std::string(APP_DATE) + "). " +
+                          " " + std::string(APP_DATE) + ". " +
                           std::string(APP_MESSAGE);
 
-    auto startupMsg = std::make_unique<ScrollingTextAnimation>(message);
+    auto startupMsg = std::make_unique<ScrollingTextAnimation>(message, 250, true);
     _app.getClock().setAnimation(std::move(startupMsg));
 }
 bool BlcFsmManager::guard_anim_done() { return !_app.getClock().isAnimationRunning(); }

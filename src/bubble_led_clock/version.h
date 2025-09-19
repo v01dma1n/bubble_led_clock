@@ -6,8 +6,8 @@
 #define APP_DATE "2025-09-19"
 
 #define VER_MAJOR 1
-#define VER_MINOR 6
-#define VER_BUILD 0
+#define VER_MINOR 7
+#define VER_BUILD 1
 
 #define APP_MESSAGE "The clock connects to WiFi. Double-press Reset for Access Point."
 
@@ -39,6 +39,10 @@
 */
 
 /* Version history
+
+2025-09-18 v.1.7.1 
+- dots with previous character added to the scrolling animation
+
 
 2025-09-18 v.1.6 OpenWeather Access Restored
 - fixed mismatch between non-secure client and https protocol in URL
