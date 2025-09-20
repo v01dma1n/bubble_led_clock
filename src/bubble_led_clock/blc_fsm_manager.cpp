@@ -75,7 +75,7 @@ void BlcFsmManager::on_exit_ntp_sync() {
 void BlcFsmManager::on_enter_ap_mode() {
     LOGMSG(APP_LOG_INFO, "Entering STATE_AP_MODE");
     setupAP(AP_HOST_NAME);
-    String msg = (String)"CONNECT TO " + AP_HOST_NAME;
+    String msg = (String)"CONNECT TO " + AP_HOST_NAME + " WIFI";
     auto apMessage = std::make_unique<ScrollingTextAnimation>(msg.c_str());
     _app.getClock().setAnimation(std::move(apMessage));
 }

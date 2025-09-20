@@ -38,6 +38,12 @@ void BubbleLedClockApp::setup() {
     LOGMSG(APP_LOG_INFO, "--- APP SETUP BEGIN ---");
     _appPrefs.setup();
 
+    // Configure the timezone from preferences at startup. This ensures the RTC
+    // time is displayed in the correct zone, even if NTP is unavailable.
+    setenv("TZ", _appPrefs.config.time_zone, 1);
+    tzset();
+    LOGINF("Timezone configured to: %s", _appPrefs.config.time_zone);
+    
     if (!_rtc.begin()) {
         LOGMSG(APP_LOG_ERROR, "Couldn't find RTC module!");
         _rtcActive = false;
@@ -73,77 +79,6 @@ void BubbleLedClockApp::setup() {
     LOGMSG(APP_LOG_INFO, "--- APP SETUP COMPLETE ---");
 }
 
-/*
-void BubbleLedClockApp::setup() {
-    LOGMSG(APP_LOG_INFO, "--- APP SETUP BEGIN ---");
-
-    i2c_bus_clear();
-
-    _appPrefs.setup();
-    _appPrefs.getPreferences();
-
-    LOGMSG(APP_LOG_INFO, "BubbleLedClockApp::setup()");
-
-    _appPrefs.dumpPreferences();
-
-     if (!_rtc.begin()) {
-        LOGMSG(APP_LOG_ERROR, "Couldn't find RTC module!");
-        _rtcActive = false;
-    } else {
-        LOGMSG(APP_LOG_INFO, "RTC module found.");
-        _rtcActive = true;
-    }
-
-    _displayManager.begin();
-
-     Preferences ap_prefs;
-    ap_prefs.begin("ap_mode_check", false);
-    
-    // Use the RTC's unix timestamp, which survives reboots
-    uint32_t last_boot_time_s = ap_prefs.getUInt("last_boot_s", 0);
-    uint32_t current_boot_time_s = _rtcActive ? _rtc.now().unixtime() : 0;
-    
-    LOGMSG(APP_LOG_INFO, "Double-reset check: Last boot time saved = %u", last_boot_time_s);
-    LOGMSG(APP_LOG_INFO, "Double-reset check: Current boot time = %u", current_boot_time_s);
-    if (last_boot_time_s > 0) {
-        LOGMSG(APP_LOG_INFO, "Double-reset check: Time difference = %d seconds", (current_boot_time_s - last_boot_time_s));
-    }
-
-    ap_prefs.putUInt("last_boot_s", current_boot_time_s);
-    ap_prefs.end();
-
-    if (_rtcActive && last_boot_time_s > 0 && (current_boot_time_s - last_boot_time_s) < DOUBLE_RESET_WINDOW_S) {
-        // --- Double Reset Path ---
-        LOGMSG(APP_LOG_INFO, "Double reset detected. Forcing AP mode.");
-        ap_prefs.remove("last_boot_s"); // Clear the key
-        
-        activateAccessPoint(); // This function will loop forever until reboot.
-    }
-    
-    LOGMSG(APP_LOG_INFO, "Normal boot detected.");
-    
-    // --- Normal startup sequence continues from here ---
-    std::string message = std::string(APP_NAME) + " v" + VERSION_STRING + 
-                          " by " + std::string(APP_AUTHOR) + 
-                          " " + std::string(APP_DATE) + ". " +
-                          std::string(APP_MESSAGE);
-
-    auto startupMsg = std::make_unique<ScrollingTextAnimation>(message);
-    _displayManager.setAnimation(std::move(startupMsg));
-    
-    while (_displayManager.isAnimationRunning()) {
-        _displayManager.update();
-        delay(10);
-    }
-    
-    _fsmManager = std::make_unique<BlcFsmManager>(*this);
-    _sceneManager = std::make_unique<SceneManager>(*this);
-    _fsmManager->setup();
-    _sceneManager->setup();
-    
-    LOGMSG(APP_LOG_INFO, "--- APP SETUP COMPLETE ---");
-}
-*/
 void BubbleLedClockApp::loop() {
 
     // Tell the managers to do their work
@@ -198,4 +133,5 @@ void BubbleLedClockApp::formatTime(char *txt, unsigned txt_size, const char *for
         txt[0] = ' ';
     }
 }
+
 

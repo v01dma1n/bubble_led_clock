@@ -25,12 +25,12 @@ SceneManager::SceneManager(BubbleLedClockApp& app) : _app(app) {}
 void SceneManager::setup() {
     static const DisplayScene scenePlaylist[] = {
       { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
-      { "Date",        "%b %d",    MATRIX,       true,  10000, 200, 40, BubbleLedClockApp_getTimeData },
+      { "Date",        "%b %d",    MATRIX,       true,   5000, 200, 40, BubbleLedClockApp_getTimeData },
       { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
-      { "Temperature", "%3.0f F",  MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getTempData },
-      { "Temperature", "%3.0f C",  MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getTempData },
+      { "Temperature", "%3.0f F",  MATRIX,       false,  5000, 250, 40, BubbleLedClockApp_getTempData },
+      { "Temperature", "%3.0f C",  MATRIX,       false,  5000, 250, 40, BubbleLedClockApp_getTempData },
       { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
-      { "Humidity",    "%3.0f PCT",MATRIX,       false, 10000, 250, 40, BubbleLedClockApp_getHumidityData }
+      { "Humidity",    "%3.0f PCT",MATRIX,       false,  5000, 250, 40, BubbleLedClockApp_getHumidityData }
     };
     _scenePlaylist = scenePlaylist;
     _numScenes = sizeof(scenePlaylist) / sizeof(DisplayScene);

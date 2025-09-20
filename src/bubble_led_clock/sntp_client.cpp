@@ -1,4 +1,5 @@
 #include "sntp_client.h"
+#include "debug.h"
 
 #include <esp_sntp.h>
 #include <Arduino.h>
@@ -17,6 +18,13 @@ bool timeAvail = false;
 
 int lastMillis = 0;
 
+static SntpSyncCallback _sync_callback = nullptr;
+
+void onNtpSync(SntpSyncCallback cb) {
+    _sync_callback = cb;
+}
+
+
 int loopSntpGetTime(unsigned intervalMillis) {
   unsigned long currMillis = millis();
 
@@ -30,10 +38,16 @@ int loopSntpGetTime(unsigned intervalMillis) {
 
 // Callback function (get's called when time adjusts via NTP)
 void timeAvailable(struct timeval *t) {
+  LOGINF("NTP time received.");
   timeAvail = true;
 
   struct tm timeinfo;
   getLocalTime(&timeinfo);
+
+  // If a callback has been registered, call it.
+  if (_sync_callback != nullptr) {
+    _sync_callback();
+  }
 }
 
 void setupSntp(const char* tz) {

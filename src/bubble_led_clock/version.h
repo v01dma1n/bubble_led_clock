@@ -6,8 +6,8 @@
 #define APP_DATE "2025-09-19"
 
 #define VER_MAJOR 1
-#define VER_MINOR 7
-#define VER_BUILD 1
+#define VER_MINOR 8
+#define VER_BUILD 0
 
 #define APP_MESSAGE "The clock connects to WiFi. Double-press Reset for Access Point."
 
@@ -26,18 +26,32 @@
    form += "  <option value=\"" + String(APP_LOG_INFO) + "\">Info</option>\n";
    form += "  <option value=\"" + String(APP_LOG_DEBUG) + "\">Debug</option>\n";
 
-  #issue005 The time is incorrect when clock starts withoug WiFi.
-  It looks like the RTC time does not consider the TZ 
-
   #issue008 OpenWeather API client is broken
   https://api.openweathermap.org/data/2.5/weather?q=,NJ,US&appid=<removed>&units=imperial
   16:29:08.084 -> HTTP GET request failed, error: 
 
-  #issue009 ...
+  #issue009 The double-reset interval is too long
+  The Double reset press must be separated at least by 1 second.
+  This is too long.
+
+  #issue010 Temperature and Humidity NO DATA should not be displayed
+
+  #issue011 The clock should also work without WiFi
+  The configuration should allow disabling WiFi and setting the clock with AP
+
+  #issue012 The messages on the display are not clear 
+  No explicit information that the WiFi is not available or not configured
+  Add AP message after client connects: Navigate to 192.1.4.1
+
+  #issue013 The logic should not call OpenWeather when there is no Internet
 
 */
 
 /* Version history
+
+2025-09-18 v.1.8.0
+-  The time of displaying other than time value is half of the time displaying
+-  Resolved: #issue005 The time is incorrect when clock starts withoug WiFi.
 
 2025-09-18 v.1.7.1 
 - dots with previous character added to the scrolling animation
