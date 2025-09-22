@@ -78,7 +78,15 @@ void SceneManager::update() {
         if (newScene.getDataValue == BubbleLedClockApp_getTempData || newScene.getDataValue == BubbleLedClockApp_getHumidityData) {
             if (!_currentWeatherData.isValid || (millis() - _lastWeatherFetchTime >= _weatherFetchInterval)) {
                 _lastWeatherFetchTime = millis();
-                _currentWeatherData = getOpenWeatherData();
+
+                OWMConfig owm_config;
+                owm_config.city = _app.getPrefs().config.owm_city;
+                owm_config.state_code = _app.getPrefs().config.owm_state_code;
+                owm_config.country_code = _app.getPrefs().config.owm_country_code;
+                owm_config.api_key = _app.getPrefs().config.owm_api_key;
+                owm_config.temp_unit = _app.getPrefs().config.tempUnit;
+                _currentWeatherData = getOpenWeatherData(owm_config);
+                
                 _app.setWeatherData(_currentWeatherData);
             }
         }

@@ -1,7 +1,7 @@
 #ifndef BLC_PREFERENCES_H
 #define BLC_PREFERENCES_H
 
-#include "blc_access_point.h"
+#include "blc_types.h"
 
 #include <Arduino.h>
 #include <IPAddress.h>

@@ -1,6 +1,16 @@
 #ifndef OPENWEATHER_CLIENT_H
 #define OPENWEATHER_CLIENT_H
 
+#include <Arduino.h>
+
+struct OWMConfig {
+    String city;
+    String state_code;
+    String country_code;
+    String api_key;
+    String temp_unit;
+};
+
 struct OpenWeatherData {
   float temperatureF;
   float humidity;
@@ -8,6 +18,6 @@ struct OpenWeatherData {
 };
 
 // Function to get the latest weather data from OpenWeatherMap
-OpenWeatherData getOpenWeatherData();
+OpenWeatherData getOpenWeatherData(const OWMConfig& config);
 
 #endif // OPENWEATHER_CLIENT_H

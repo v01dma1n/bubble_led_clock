@@ -1,5 +1,4 @@
 #include "anim_scrolling_text.h"
-
 #include <Arduino.h>
 
 ScrollingTextAnimation::ScrollingTextAnimation(std::string text, unsigned long scrollDelay, bool dotsWithPreviousChar)
@@ -7,7 +6,7 @@ ScrollingTextAnimation::ScrollingTextAnimation(std::string text, unsigned long s
       _scrollDelay(scrollDelay),
       _lastScrollTime(0),
       _currentPosition(0),
-      _dotsWithPreviousChar(dotsWithPreviousChar)  {}
+      _dotsWithPreviousChar(dotsWithPreviousChar) {}
 
 void ScrollingTextAnimation::setup(IDisplayDriver* display) {
     IAnimation::setup(display);
@@ -32,7 +31,9 @@ void ScrollingTextAnimation::setup(IDisplayDriver* display) {
 }
 
 bool ScrollingTextAnimation::isDone() {
-    return _currentPosition >= (int)_text.length();
+    // --- THIS IS THE FIX ---
+    // The check must use the length of the parsed text.
+    return _currentPosition >= (int)_parsedText.length();
 }
 
 void ScrollingTextAnimation::update() {
@@ -43,7 +44,6 @@ void ScrollingTextAnimation::update() {
     unsigned long currentTime = millis();
     if (currentTime - _lastScrollTime >= _scrollDelay) {
         _lastScrollTime = currentTime;
-
         _display->clear();
         int displaySize = _display->getDisplaySize();
 

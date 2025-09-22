@@ -1,26 +1,21 @@
 #include "openweather_client.h"
 
 #include "debug.h"
-#include "blc_app.h"
-#include "blc_preferences.h"
 
 #include <WiFi.h>
 #include <HTTPClient.h>
-// #include <WiFiClientSecure.h>
 #include <WiFiClient.h>
 #include <Arduino.h>
 
-OpenWeatherData getOpenWeatherData() {
+OpenWeatherData getOpenWeatherData(const OWMConfig& config) {
     OpenWeatherData data;
     static HTTPClient http;
-    // WiFiClientSecure client;
-    // client.setInsecure(); // Bypass SSL certificate validation for simplicity
     static WiFiClient client;
 
-    String city = BubbleLedClockApp::getInstance().getPrefs().config.owm_city;
+    String city = config.city;
     city.replace(" ", "%20"); // the spaces in the cities mess up the URL
-    String state = BubbleLedClockApp::getInstance().getPrefs().config.owm_state_code;
-    String country = BubbleLedClockApp::getInstance().getPrefs().config.owm_country_code;
+    String state = config.state_code;
+    String country = config.country_code;
 
     // Build the API request URL from the config file
     String url = "http://api.openweathermap.org/data/2.5/weather?q=";
@@ -28,9 +23,9 @@ OpenWeatherData getOpenWeatherData() {
     if (state.length() > 0) { url += "," + state; }
     if (country.length() > 0) { url += "," + country; }
     url += "&appid=";
-    url += BubbleLedClockApp::getInstance().getPrefs().config.owm_api_key;
+    url += config.api_key;
     url += "&units=";
-    url += BubbleLedClockApp::getInstance().getPrefs().config.tempUnit;
+    url += config.temp_unit;
 
     LOGMSG(APP_LOG_DEBUG, "Fetching weather from: %s", url.c_str());
     if (http.begin(client, url)) {

@@ -3,7 +3,7 @@
 
 #define APP_NAME "Bubble LED Clock"
 #define APP_AUTHOR "v01dma1n"
-#define APP_DATE "2025-09-20"
+#define APP_DATE "2025-09-25"
 
 #define VER_MAJOR 1
 #define VER_MINOR 9
@@ -45,11 +45,19 @@
 
   #issue013 The logic should not call OpenWeather when there is no Internet
 
+  #issue014 The display brightness control does not seem to be working
+
+  #issue015
+
 */
 
 /* Version history
 
-2025-09-20 v.1.9.0
+2025-09-20 v.1.9.0 openweather_client is now independent from blc
+- removed include any blc header files from openweather_client.
+- blc_fsm_manager is now generic clock_fsm_manager
+- fixed crash on NTP timeAvailable() due to RTC update
+- the AP is now implemented as AccessPointManager
 
 2025-09-20 v.1.8.0 TimeZone fixed when getting time from RTC
 -  The time of displaying other than time value is half of the time displaying

@@ -4,17 +4,20 @@
 #include <memory>
 #include "blc_types.h"
 #include "blc_scene_manager.h"
-#include "blc_preferences.h"
-#include "blc_fsm_manager.h"
+// #include "blc_preferences.h"
+
+#include "i_generic_clock.h"
+#include "clock_fsm_manager.h"
 
 #include "disp_driver_ht16k33.h"
 #include "display_manager.h"
+#include "access_point_manager.h"
 #include "openweather_client.h"
 #include "RTClib.h"
 
 #define AP_HOST_NAME "bubble-clock"
 
-class BubbleLedClockApp {
+class BubbleLedClockApp : public IGenericClock {
 public:
     static BubbleLedClockApp& getInstance() {
         static BubbleLedClockApp instance;
@@ -29,7 +32,7 @@ public:
     DisplayManager& getClock() { return _displayManager; }
     IDisplayDriver& getDisplay() { return _display; }
     RTC_DS1307& getRtc() { return _rtc; }
-    BlcFsmManager& getFsmManager() { return *_fsmManager; }
+    ClockFsmManager& getFsmManager() { return *_fsmManager; }
     SceneManager& getSceneManager() { return *_sceneManager; }
     bool isRtcActive() const { return _rtcActive; }
     
@@ -38,12 +41,13 @@ public:
     float getHumidityData();
     void setWeatherData(const OpenWeatherData& data) { _currentWeatherData = data; }
     void formatTime(char *txt, unsigned txt_size, const char *format, time_t now);
+    void syncRtcFromNtp() override;
+    const char* getAppName() const override;
+    void activateAccessPoint() override;
 
 private:
     BubbleLedClockApp();
 
-    void activateAccessPoint();
-    
     // Core hardware components
     DispDriverHT16K33 _display;
     DisplayManager _displayManager;
@@ -52,7 +56,8 @@ private:
     bool _rtcActive;
 
     // Manager classes
-    std::unique_ptr<BlcFsmManager> _fsmManager;
+    std::unique_ptr<AccessPointManager> _apManager; 
+    std::unique_ptr<ClockFsmManager> _fsmManager;
     std::unique_ptr<SceneManager> _sceneManager;
     
     // App-level state data

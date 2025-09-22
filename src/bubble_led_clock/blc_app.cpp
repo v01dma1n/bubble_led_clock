@@ -1,7 +1,9 @@
 #include "blc_app.h"
 #include "debug.h"
 #include "version.h"             
+
 #include "anim_scrolling_text.h" 
+#include "clock_fsm_manager.h"
 
 #include <Wire.h> 
 
@@ -22,12 +24,12 @@ void i2c_bus_clear() {
 
 #define AP_MODE_LONG_PRESS_DURATION 3000 // 3 seconds
 
-// --- Constructor with Member Initializer List ---
 BubbleLedClockApp::BubbleLedClockApp() :
     _display(0x70, 8),
     _displayManager(_display),
     _rtc(),
-    _appPrefs()
+    _appPrefs(),
+    _apManager(std::make_unique<AccessPointManager>(_appPrefs)) 
 {
     _rtcActive = false;
 }
@@ -35,15 +37,8 @@ BubbleLedClockApp::BubbleLedClockApp() :
 #define DOUBLE_RESET_WINDOW_S 5 // 5-second window for double reset
 
 void BubbleLedClockApp::setup() {
-    LOGMSG(APP_LOG_INFO, "--- APP SETUP BEGIN ---");
     _appPrefs.setup();
 
-    // Configure the timezone from preferences at startup. This ensures the RTC
-    // time is displayed in the correct zone, even if NTP is unavailable.
-    setenv("TZ", _appPrefs.config.time_zone, 1);
-    tzset();
-    LOGINF("Timezone configured to: %s", _appPrefs.config.time_zone);
-    
     if (!_rtc.begin()) {
         LOGMSG(APP_LOG_ERROR, "Couldn't find RTC module!");
         _rtcActive = false;
@@ -52,6 +47,9 @@ void BubbleLedClockApp::setup() {
         _rtcActive = true;
     }
     _displayManager.begin();
+    
+    LOGMSG(APP_LOG_INFO, "BubbleLedClockApp::setup()");
+    _appPrefs.dumpPreferences();
     
     Preferences ap_prefs;
     ap_prefs.begin("ap_mode_check", false);
@@ -63,15 +61,14 @@ void BubbleLedClockApp::setup() {
     ap_prefs.end();
 
     if (_rtcActive && last_boot_time_s > 0 && (current_boot_time_s - last_boot_time_s) < DOUBLE_RESET_WINDOW_S) {
-        LOGMSG(APP_LOG_INFO, "Double reset detected. Forcing AP mode.");
-        ap_prefs.remove("last_boot_s");
+        // Double reset was detected. Call the function that handles AP mode.
+        // This function will loop forever and will not return.
         activateAccessPoint();
     }
     
     LOGMSG(APP_LOG_INFO, "Normal boot detected.");
-    _appPrefs.dumpPreferences();
-      
-    _fsmManager = std::make_unique<BlcFsmManager>(*this);
+    
+    _fsmManager = std::make_unique<ClockFsmManager>(*this);
     _sceneManager = std::make_unique<SceneManager>(*this);
     _fsmManager->setup();
     _sceneManager->setup();
@@ -87,40 +84,41 @@ void BubbleLedClockApp::loop() {
     _displayManager.update();
 }
 
-void BubbleLedClockApp::activateAccessPoint()
-{
-    setupAP(AP_HOST_NAME);
 
+void BubbleLedClockApp::activateAccessPoint() {
+    // 1. Setup the Access Point
+    _apManager->setup(AP_HOST_NAME);
+
+    // 2. Setup the display state machine for AP mode messages
     enum ApDisplayState { WAITING_FOR_CLIENT, CLIENT_CONNECTED };
     ApDisplayState apState = WAITING_FOR_CLIENT;
-    g_isClientConnected = false; // Ensure flag is reset before starting
 
+    // 3. Create and start the initial "waiting" message
     String waitingMsgStr = "AP MODE -- CONNECT TO ";
-    waitingMsgStr += AP_HOST_NAME;
-    waitingMsgStr += " Wi-Fi";
-    auto apMessage = std::make_unique<ScrollingTextAnimation>(waitingMsgStr.c_str());
-    _displayManager.setAnimation(std::move(apMessage));
+    waitingMsgStr += getAppName();
+    auto waitingAnimation = std::make_unique<ScrollingTextAnimation>(waitingMsgStr.c_str());
+    _displayManager.setAnimation(std::move(waitingAnimation));
 
-    // This blocking loop runs the Access Point until the device is rebooted.
+    // 4. Enter the main AP loop
     while (true) {
-
-      if (apState == WAITING_FOR_CLIENT && g_isClientConnected) {
+        // Check if the client connection state has changed
+        if (apState == WAITING_FOR_CLIENT && _apManager->isClientConnected()) {
             // A client has connected, change the message
             apState = CLIENT_CONNECTED;
             auto connectedAnimation = std::make_unique<ScrollingTextAnimation>("CONNECTED -- PENDING SETUP...");
             _displayManager.setAnimation(std::move(connectedAnimation));
-
-        } else if (apState == CLIENT_CONNECTED && !g_isClientConnected) {
+        } else if (apState == CLIENT_CONNECTED && !_apManager->isClientConnected()) {
             // The client has disconnected, go back to the waiting message
             apState = WAITING_FOR_CLIENT;
             auto waitingAnimationRetry = std::make_unique<ScrollingTextAnimation>(waitingMsgStr.c_str());
             _displayManager.setAnimation(std::move(waitingAnimationRetry));
-        }          
-        _displayManager.update();
-        processAPInput();
+        }
+
+        // Keep all managers running
+        _displayManager.update(); // Run the current animation
+        _apManager->loop();       // Handle DNS requests
         delay(10);
     }
-
 }
 
 float BubbleLedClockApp::getTempData() { return _currentWeatherData.temperatureF; }
@@ -134,4 +132,20 @@ void BubbleLedClockApp::formatTime(char *txt, unsigned txt_size, const char *for
     }
 }
 
+void BubbleLedClockApp::syncRtcFromNtp() {
+    if (!_rtcActive) {
+        return; // Don't do anything if there's no RTC
+    }
+    
+    // Get the current system time (which is now synced to NTP and is in UTC)
+    time_t now_utc = time(nullptr);
+    
+    // Adjust the hardware RTC to this new UTC time
+    _rtc.adjust(DateTime(now_utc));
+    
+    LOGINF("RTC synchronized with NTP time.");
+}
 
+const char* BubbleLedClockApp::getAppName() const {
+    return AP_HOST_NAME;
+}

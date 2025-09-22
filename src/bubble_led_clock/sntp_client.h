@@ -3,9 +3,6 @@
 
 extern bool timeAvail;
 
-typedef void (*SntpSyncCallback)();
-void onNtpSync(SntpSyncCallback cb);
-
 void setupSntp(const char* tz);
 
 int loopSntpGetTime(unsigned intervalMillis);
