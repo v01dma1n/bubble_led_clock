@@ -2,7 +2,8 @@
 #define BLC_SCENE_MANAGER_H
 
 #include "blc_types.h"
-#include "openweather_client.h"
+
+#include <ESP32NTPClock.h>
 
 class BubbleLedClockApp; // Forward-declaration
 

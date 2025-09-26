@@ -4,16 +4,11 @@
 #include <memory>
 #include "blc_types.h"
 #include "blc_scene_manager.h"
-// #include "blc_preferences.h"
-
-#include "i_generic_clock.h"
-#include "clock_fsm_manager.h"
-
-#include "disp_driver_ht16k33.h"
-#include "display_manager.h"
 #include "access_point_manager.h"
-#include "openweather_client.h"
+
 #include "RTClib.h"
+
+#include <ESP32NTPClock.h>
 
 #define AP_HOST_NAME "bubble-clock"
 

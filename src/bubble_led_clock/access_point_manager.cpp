@@ -1,7 +1,8 @@
 #include "access_point_manager.h"
-#include "blc_preferences.h"
 #include "debug.h"
 #include "tz_data.h"
+
+#include <ESP32NTPClock.h>
 #include <WiFi.h>
 
 static AccessPointManager* _apInstance = nullptr;

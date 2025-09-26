@@ -1,6 +1,8 @@
 #include "debug.h"
 #include "blc_preferences.h"
 
+#include <ESP32NTPClock.h>
+
 #include <Preferences.h>
 #include <Arduino.h>
 #include <string.h>

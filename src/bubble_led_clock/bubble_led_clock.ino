@@ -1,5 +1,7 @@
 #include "blc_app.h"
 
+#include <ESP32NTPClock.h>
+
 // Define the mutex here
 SemaphoreHandle_t serialMutex = NULL;
 
@@ -8,6 +10,10 @@ BubbleLedClockApp& app = BubbleLedClockApp::getInstance();
 
 void setup() {
   Serial.begin(115200);
+  unsigned long startTime = millis();
+  while (!Serial && (millis() - startTime < 2000)) {
+    ; // Wait for serial port to connect, with a 2-second timeout
+  }
   delay(200);
   Serial.println("\nStarting...");
 

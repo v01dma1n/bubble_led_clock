@@ -6,7 +6,8 @@
 // --- Shared Animation & Scene Types ---
 enum AnimationType {
   SLOT_MACHINE,
-  MATRIX
+  MATRIX,
+  SCROLLING
 };
 
 struct DisplayScene {

@@ -3,10 +3,10 @@
 
 #define APP_NAME "Bubble LED Clock"
 #define APP_AUTHOR "v01dma1n"
-#define APP_DATE "2025-09-25"
+#define APP_DATE "2025-09-26"
 
-#define VER_MAJOR 1
-#define VER_MINOR 9
+#define VER_MAJOR 2
+#define VER_MINOR 0
 #define VER_BUILD 0
 
 #define APP_MESSAGE "The clock connects to WiFi. Double-press Reset for Access Point."
@@ -47,13 +47,18 @@
 
   #issue014 The display brightness control does not seem to be working
 
-  #issue015
+  #issue016
 
 */
 
 /* Version history
 
-2025-09-20 v.1.9.0 openweather_client is now independent from blc
+2025-09-26 v.2.0.0 The source code split between library and blc
+- wait for Serial to connect to prevent initial Serial Monitor garbage
+-  #issue015 The first animation is not displayed in full
+  This looks like a stalled timer.
+
+2025-09-25 v.1.9.0 openweather_client is now independent from blc
 - removed include any blc header files from openweather_client.
 - blc_fsm_manager is now generic clock_fsm_manager
 - fixed crash on NTP timeAvailable() due to RTC update

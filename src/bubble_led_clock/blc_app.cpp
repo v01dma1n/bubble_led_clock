@@ -2,9 +2,7 @@
 #include "debug.h"
 #include "version.h"             
 
-#include "anim_scrolling_text.h" 
-#include "clock_fsm_manager.h"
-
+#include <ESP32NTPClock.h>
 #include <Wire.h> 
 
 // This function manually toggles the I2C clock line to force
