@@ -14,7 +14,7 @@ void setup() {
   while (!Serial && (millis() - startTime < 2000)) {
     ; // Wait for serial port to connect, with a 2-second timeout
   }
-  delay(200);
+  // delay(200);
   Serial.println("\nStarting...");
 
   // Create the mutex before any other tasks might use it

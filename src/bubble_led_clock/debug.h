@@ -21,18 +21,4 @@ extern SemaphoreHandle_t serialMutex;
 #define LOGINF(format, ...)  LOGMSG(APP_LOG_INFO,  format, ##__VA_ARGS__)
 #define LOGDBG(format, ...) LOGMSG(APP_LOG_DEBUG, format, ##__VA_ARGS__)
 
-/*
-#ifdef ESP32DEBUGGING
- #define DBGLOG(format, ...) \
-    do { \
-        if (serialMutex != NULL && xSemaphoreTake(serialMutex, portMAX_DELAY) == pdTRUE) { \
-            Serial.printf(format "\n", ##__VA_ARGS__); \
-            xSemaphoreGive(serialMutex); \
-        } \
-    } while (0)
-#else
-  #define DBGLOG(format, ...)
-#endif
-*/
-
 #endif // DEBUG_H

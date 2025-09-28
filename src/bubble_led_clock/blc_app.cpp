@@ -5,6 +5,22 @@
 #include <ESP32NTPClock.h>
 #include <Wire.h> 
 
+float BubbleLedClockApp_getTimeData() { return 0; } // Placeholder
+float BubbleLedClockApp_getTempData() { return BubbleLedClockApp::getInstance().getTempData(); }
+float BubbleLedClockApp_getHumidityData() { return BubbleLedClockApp::getInstance().getHumidityData(); }
+
+static const DisplayScene scenePlaylist[] = {
+    { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
+    { "Date",        "%b %d %Y", SCROLLING,    true,   7000, 300,  0, BubbleLedClockApp_getTimeData },
+    { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
+    { "Temperature", "%3.0f F",  MATRIX,       false,  5000, 250, 40, BubbleLedClockApp_getTempData },
+    { "Temperature", "%3.0f C",  MATRIX,       false,  5000, 250, 40, BubbleLedClockApp_getTempData },
+    { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
+    { "Humidity",    "%3.0f PCT",MATRIX,       false,  5000, 250, 40, BubbleLedClockApp_getHumidityData }
+};
+static const int numScenes = sizeof(scenePlaylist) / sizeof(DisplayScene);
+
+
 // This function manually toggles the I2C clock line to force
 // any stuck slave device to release the data line.
 void i2c_bus_clear() {
@@ -27,7 +43,7 @@ BubbleLedClockApp::BubbleLedClockApp() :
     _displayManager(_display),
     _rtc(),
     _appPrefs(),
-    _apManager(std::make_unique<AccessPointManager>(_appPrefs)) 
+    _apManager(std::make_unique<BlcAccessPointManager>(_appPrefs)) 
 {
     _rtcActive = false;
 }
@@ -35,6 +51,11 @@ BubbleLedClockApp::BubbleLedClockApp() :
 #define DOUBLE_RESET_WINDOW_S 5 // 5-second window for double reset
 
 void BubbleLedClockApp::setup() {
+
+    // Force-reset the I2C bus to clear any stuck devices, then initialize it.
+    i2c_bus_clear();
+    Wire.begin();
+    
     _appPrefs.setup();
 
     if (!_rtc.begin()) {
@@ -49,78 +70,47 @@ void BubbleLedClockApp::setup() {
     LOGMSG(APP_LOG_INFO, "BubbleLedClockApp::setup()");
     _appPrefs.dumpPreferences();
     
-    Preferences ap_prefs;
-    ap_prefs.begin("ap_mode_check", false);
-    
-    uint32_t last_boot_time_s = ap_prefs.getUInt("last_boot_s", 0);
-    uint32_t current_boot_time_s = _rtcActive ? _rtc.now().unixtime() : 0;
-    
-    ap_prefs.putUInt("last_boot_s", current_boot_time_s);
-    ap_prefs.end();
-
-    if (_rtcActive && last_boot_time_s > 0 && (current_boot_time_s - last_boot_time_s) < DOUBLE_RESET_WINDOW_S) {
-        // Double reset was detected. Call the function that handles AP mode.
-        // This function will loop forever and will not return.
+    _bootManager = std::make_unique<BootManager>(*this);
+    if (_bootManager->checkForForceAPMode()) {
+        LOGMSG(APP_LOG_INFO, "Double reset detected. Activating AP mode.");
         activateAccessPoint();
+        return; // Stop further setup and wait in AP mode
     }
     
     LOGMSG(APP_LOG_INFO, "Normal boot detected.");
     
     _fsmManager = std::make_unique<ClockFsmManager>(*this);
     _sceneManager = std::make_unique<SceneManager>(*this);
+    _weatherManager = std::make_unique<WeatherDataManager>(*this);
     _fsmManager->setup();
-    _sceneManager->setup();
-    
+    _sceneManager->setup(scenePlaylist, numScenes); 
+      
     LOGMSG(APP_LOG_INFO, "--- APP SETUP COMPLETE ---");
 }
 
 void BubbleLedClockApp::loop() {
-
-    // Tell the managers to do their work
+    _weatherManager->update();
     _fsmManager->update();
     _sceneManager->update();
     _displayManager.update();
 }
 
-
 void BubbleLedClockApp::activateAccessPoint() {
-    // 1. Setup the Access Point
-    _apManager->setup(AP_HOST_NAME);
+    _apManager->setup(getAppName());
 
-    // 2. Setup the display state machine for AP mode messages
-    enum ApDisplayState { WAITING_FOR_CLIENT, CLIENT_CONNECTED };
-    ApDisplayState apState = WAITING_FOR_CLIENT;
-
-    // 3. Create and start the initial "waiting" message
     String waitingMsgStr = "AP MODE -- CONNECT TO ";
     waitingMsgStr += getAppName();
-    auto waitingAnimation = std::make_unique<ScrollingTextAnimation>(waitingMsgStr.c_str());
-    _displayManager.setAnimation(std::move(waitingAnimation));
-
-    // 4. Enter the main AP loop
-    while (true) {
-        // Check if the client connection state has changed
-        if (apState == WAITING_FOR_CLIENT && _apManager->isClientConnected()) {
-            // A client has connected, change the message
-            apState = CLIENT_CONNECTED;
-            auto connectedAnimation = std::make_unique<ScrollingTextAnimation>("CONNECTED -- PENDING SETUP...");
-            _displayManager.setAnimation(std::move(connectedAnimation));
-        } else if (apState == CLIENT_CONNECTED && !_apManager->isClientConnected()) {
-            // The client has disconnected, go back to the waiting message
-            apState = WAITING_FOR_CLIENT;
-            auto waitingAnimationRetry = std::make_unique<ScrollingTextAnimation>(waitingMsgStr.c_str());
-            _displayManager.setAnimation(std::move(waitingAnimationRetry));
-        }
-
-        // Keep all managers running
-        _displayManager.update(); // Run the current animation
-        _apManager->loop();       // Handle DNS requests
-        delay(10);
-    }
+    
+    // This single call handles the entire blocking loop and display logic.
+    _apManager->runBlockingLoop(getClock(), waitingMsgStr.c_str(), "CONNECTED -- SETUP...");
 }
 
-float BubbleLedClockApp::getTempData() { return _currentWeatherData.temperatureF; }
-float BubbleLedClockApp::getHumidityData() { return _currentWeatherData.humidity; }
+float BubbleLedClockApp::getTempData() { 
+    return _currentWeatherData.isValid ? _currentWeatherData.temperatureF : UNSET_VALUE;
+}
+float BubbleLedClockApp::getHumidityData() { 
+    return _currentWeatherData.isValid ? _currentWeatherData.humidity : UNSET_VALUE;
+}
 
 void BubbleLedClockApp::formatTime(char *txt, unsigned txt_size, const char *format, time_t now) {
     struct tm timeinfo = *localtime(&now);
@@ -147,3 +137,4 @@ void BubbleLedClockApp::syncRtcFromNtp() {
 const char* BubbleLedClockApp::getAppName() const {
     return AP_HOST_NAME;
 }
+

@@ -3,10 +3,10 @@
 
 #define APP_NAME "Bubble LED Clock"
 #define APP_AUTHOR "v01dma1n"
-#define APP_DATE "2025-09-26"
+#define APP_DATE "2025-09-30"
 
 #define VER_MAJOR 2
-#define VER_MINOR 0
+#define VER_MINOR 1
 #define VER_BUILD 0
 
 #define APP_MESSAGE "The clock connects to WiFi. Double-press Reset for Access Point."
@@ -53,8 +53,23 @@
 
 /* Version history
 
+2025-09-30 v.2.1.0 ESP32NTPClock library further separated
+- The AP base configuration is in base_access_point_manager
+- Decoupled Data Fetching from Display Logic
+- OpenWeather uses now HTTPS
+- Double reset logic moved to the library
+- AP UI loop is now in the library
+
 2025-09-26 v.2.0.0 The source code split between library and blc
-- wait for Serial to connect to prevent initial Serial Monitor garbage
+- wait for Serial to connect to prevent initial... setup complete
+NTP time received.
+RTC synchronized with NTP time.
+Scene: Time - 18.33.02
+Fetching new weather data...
+Fetching weather from: http://api.openweathermap.org/data/2.5/weather?q=South%20Plainfield,Nj,US&appid=91bd80ec15e5dcc704ea41704272fe69&units=metric
+HTTP GET request failed, code: -1, response: 
+Scene: Date - Sep 30 2025
+Scene: Time - 18.33.19 Serial Monitor garbage
 -  #issue015 The first animation is not displayed in full
   This looks like a stalled timer.
 
