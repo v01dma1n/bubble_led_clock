@@ -2,6 +2,7 @@
 #define BLC_ACCESS_POINT_MANAGER_H
 
 #include <base_access_point_manager.h>
+#include "blc_preferences.h"
 
 class BlcAccessPointManager : public BaseAccessPointManager {
 public:

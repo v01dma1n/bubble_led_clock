@@ -6,7 +6,7 @@
 #define APP_DATE "2025-09-30"
 
 #define VER_MAJOR 2
-#define VER_MINOR 1
+#define VER_MINOR 2
 #define VER_BUILD 0
 
 #define APP_MESSAGE "The clock connects to WiFi. Double-press Reset for Access Point."
@@ -26,10 +26,6 @@
    form += "  <option value=\"" + String(APP_LOG_INFO) + "\">Info</option>\n";
    form += "  <option value=\"" + String(APP_LOG_DEBUG) + "\">Debug</option>\n";
 
-  #issue008 OpenWeather API client is broken
-  https://api.openweathermap.org/data/2.5/weather?q=,NJ,US&appid=<removed>&units=imperial
-  16:29:08.084 -> HTTP GET request failed, error: 
-
   #issue009 The double-reset interval is too long
   The Double reset press must be separated at least by 1 second.
   This is too long.
@@ -41,7 +37,7 @@
 
   #issue012 The messages on the display are not clear 
   No explicit information that the WiFi is not available or not configured
-  Add AP message after client connects: Navigate to 192.1.4.1
+  Add AP message after client connects: Navigate to 192.168.4.1
 
   #issue013 The logic should not call OpenWeather when there is no Internet
 
@@ -53,12 +49,24 @@
 
 /* Version history
 
+2025-09-30 v.2.2.0 Library fixes
+- tz_data is moved to the library
+- #issue004 Debug enum validation is hardcoded in access_point.c
+   form += "  <option value=\"" + String(APP_LOG_ERROR) + "\">Error</option>\n";
+   form += "  <option value=\"" + String(APP_LOG_INFO) + "\">Info</option>\n";
+   form += "  <option value=\"" + String(APP_LOG_DEBUG) + "\">Debug</option>\n";
+- AppPrefs are partially moved to the library
+
 2025-09-30 v.2.1.0 ESP32NTPClock library further separated
 - The AP base configuration is in base_access_point_manager
 - Decoupled Data Fetching from Display Logic
 - OpenWeather uses now HTTPS
 - Double reset logic moved to the library
 - AP UI loop is now in the library
+- #issue008 OpenWeather API client is broken
+  https://api.openweathermap.org/data/2.5/weather?q=,NJ,US&appid=<removed>&units=imperial
+  16:29:08.084 -> HTTP GET request failed, error: 
+
 
 2025-09-26 v.2.0.0 The source code split between library and blc
 - wait for Serial to connect to prevent initial... setup complete

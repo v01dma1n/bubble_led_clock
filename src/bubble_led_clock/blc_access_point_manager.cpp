@@ -14,12 +14,14 @@ void BlcAccessPointManager::initializeFormFields() {
     
     BaseAccessPointManager::initializeFormFields();
 
+    AppPreferences& appPrefs = static_cast<AppPreferences&>(_prefs);
+
     FormField startupAnimField;
     startupAnimField.id = "showStartupAnim";
     startupAnimField.name = "Show Startup Anim";
     startupAnimField.isMasked = false;
     startupAnimField.prefType = PREF_BOOL;
-    startupAnimField.pref.bool_pref = &_prefs.config.showStartupAnimation;
+    startupAnimField.pref.bool_pref = &appPrefs.config.showStartupAnimation;
     _formFields.push_back(startupAnimField);
 
     FormField owmCityField;
@@ -27,7 +29,7 @@ void BlcAccessPointManager::initializeFormFields() {
     owmCityField.name = "OWM City";
     owmCityField.isMasked = false;
     owmCityField.prefType = PREF_STRING;
-    owmCityField.pref.str_pref = _prefs.config.owm_city;
+    owmCityField.pref.str_pref = appPrefs.config.owm_city;
     _formFields.push_back(owmCityField);
     
     FormField owmStateField;
@@ -35,7 +37,7 @@ void BlcAccessPointManager::initializeFormFields() {
     owmStateField.name = "OWM State Code";
     owmStateField.isMasked = false;
     owmStateField.prefType = PREF_STRING;
-    owmStateField.pref.str_pref = _prefs.config.owm_state_code;
+    owmStateField.pref.str_pref = appPrefs.config.owm_state_code;
     _formFields.push_back(owmStateField);
 
     FormField owmCountryField;
@@ -43,7 +45,7 @@ void BlcAccessPointManager::initializeFormFields() {
     owmCountryField.name = "OWM Country Code";
     owmCountryField.isMasked = false;
     owmCountryField.prefType = PREF_STRING;
-    owmCountryField.pref.str_pref = _prefs.config.owm_country_code;
+    owmCountryField.pref.str_pref = appPrefs.config.owm_country_code;
     _formFields.push_back(owmCountryField);
 
     FormField owmApiKeyField;
@@ -51,7 +53,7 @@ void BlcAccessPointManager::initializeFormFields() {
     owmApiKeyField.name = "OWM API Key";
     owmApiKeyField.isMasked = true;
     owmApiKeyField.prefType = PREF_STRING;
-    owmApiKeyField.pref.str_pref = _prefs.config.owm_api_key;
+    owmApiKeyField.pref.str_pref = appPrefs.config.owm_api_key;
     _formFields.push_back(owmApiKeyField);
 
     FormField tempUnitField;
@@ -59,7 +61,7 @@ void BlcAccessPointManager::initializeFormFields() {
     tempUnitField.name = "Temp Unit (imperial/metric)";
     tempUnitField.isMasked = false;
     tempUnitField.prefType = PREF_SELECT; 
-    tempUnitField.pref.str_pref = _prefs.config.tempUnit;
+    tempUnitField.pref.str_pref = appPrefs.config.tempUnit;
     tempUnitField.select_options = tempUnitOptions; // Point to the options array
     tempUnitField.num_select_options = numTempUnitOptions; // Set the number of options
     _formFields.push_back(tempUnitField);
