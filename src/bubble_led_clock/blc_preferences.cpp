@@ -7,10 +7,6 @@
 #include <Arduino.h>
 #include <string.h>
 
-#define APP_PREF_WIFI_SSID "wifi_ssid"
-#define APP_PREF_PASSWORD "password"
-#define APP_PREF_TIME_ZONE "time_zone"
-#define APP_PREF_LOG_LEVEL "log_level"
 #define APP_PREF_SHOW_STARTUP_ANIM "startup_anim"
 #define APP_PREF_OWM_API_KEY "owm_api_key"
 #define APP_PREF_OWM_CITY    "owm_city"

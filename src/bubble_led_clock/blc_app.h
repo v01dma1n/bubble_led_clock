@@ -31,12 +31,13 @@ public:
     float getHumidityData();
     
     // --- IGenericClock Overrides ---
-    void syncRtcFromNtp() override;
     const char* getAppName() const override;
-    void activateAccessPoint() override;
     const char* getSsid() const override { return _appPrefs.config.ssid; }
     const char* getPassword() const override { return _appPrefs.config.password; }
     const char* getTimezone() const override { return _appPrefs.config.time_zone; }
+
+    void syncRtcFromNtp() override;
+    void activateAccessPoint() override;
     bool isOkToRunScenes() const override { return _fsmManager->isInState("RUNNING_NORMAL"); }
 
     const char* getTempUnit() const override { return _appPrefs.config.tempUnit; }

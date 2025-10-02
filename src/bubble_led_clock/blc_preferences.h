@@ -2,7 +2,7 @@
 #define BLC_PREFERENCES_H
 
 #include "blc_types.h"
-#include <base_preferences.h> // <-- Include the new library header
+#include <base_preferences.h> 
 
 // AppConfig now inherits from BaseConfig and only adds specific fields
 struct AppConfig : public BaseConfig {
