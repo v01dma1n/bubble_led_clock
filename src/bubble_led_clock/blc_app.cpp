@@ -3,12 +3,15 @@
 #include "version.h"             
 
 #include <ESP32NTPClock.h>
+#include <ESP32NTPClock_HT16K33.h>
 #include <Wire.h> 
 
-float BubbleLedClockApp_getTimeData() { return 0; } // Placeholder
+// --- Data getters for the scene playlist ---
+float BubbleLedClockApp_getTimeData() { return 0; }
 float BubbleLedClockApp_getTempData() { return BubbleLedClockApp::getInstance().getTempData(); }
 float BubbleLedClockApp_getHumidityData() { return BubbleLedClockApp::getInstance().getHumidityData(); }
 
+// --- The application's specific scene playlist ---
 static const DisplayScene scenePlaylist[] = {
     { "Time",        "%H.%M.%S", SLOT_MACHINE, false, 10000, 200, 50, BubbleLedClockApp_getTimeData },
     { "Date",        "%b %d %Y", SCROLLING,    true,   7000, 300,  0, BubbleLedClockApp_getTimeData },
@@ -20,96 +23,69 @@ static const DisplayScene scenePlaylist[] = {
 };
 static const int numScenes = sizeof(scenePlaylist) / sizeof(DisplayScene);
 
-
-// This function manually toggles the I2C clock line to force
-// any stuck slave device to release the data line.
-void i2c_bus_clear() {
-    pinMode(SDA, INPUT_PULLUP);
-    pinMode(SCL, INPUT_PULLUP);
-    delay(5);
-
-    for (int i = 0; i < 9; i++) {
-        digitalWrite(SCL, HIGH);
-        delay(5);
-        digitalWrite(SCL, LOW);
-        delay(5);
-    }
-}
-
-#define AP_MODE_LONG_PRESS_DURATION 3000 // 3 seconds
-
+// --- Constructor ---
+// Initializes members and assigns pointers to the base class
 BubbleLedClockApp::BubbleLedClockApp() :
     _display(0x70, 8),
     _displayManager(_display),
-    _rtc(),
     _appPrefs(),
-    _apManager(std::make_unique<BlcAccessPointManager>(_appPrefs)) 
+    _apManager(_appPrefs)
 {
+    // Assign the pointers in the base class AFTER members are constructed
+    _prefs = &_appPrefs;
+    BaseNtpClockApp::_apManager = &_apManager;
     _rtcActive = false;
 }
  
-#define DOUBLE_RESET_WINDOW_S 5 // 5-second window for double reset
-
+// --- Main Setup and Loop ---
 void BubbleLedClockApp::setup() {
-
-    // Force-reset the I2C bus to clear any stuck devices, then initialize it.
+    // 1. Initialize application-specific hardware
     i2c_bus_clear();
-    Wire.begin();
-    
-    _appPrefs.setup();
-
-    if (!_rtc.begin()) {
-        LOGMSG(APP_LOG_ERROR, "Couldn't find RTC module!");
-        _rtcActive = false;
-    } else {
-        LOGMSG(APP_LOG_INFO, "RTC module found.");
-        _rtcActive = true;
-    }
     _displayManager.begin();
-    
-    LOGMSG(APP_LOG_INFO, "BubbleLedClockApp::setup()");
-    _appPrefs.dumpPreferences();
-    
-    _bootManager = std::make_unique<BootManager>(*this);
-    if (_bootManager->checkForForceAPMode()) {
-        LOGMSG(APP_LOG_INFO, "Double reset detected. Activating AP mode.");
-        activateAccessPoint();
-        return; // Stop further setup and wait in AP mode
+    _rtcActive = _rtc.begin();
+    if (_rtcActive && (!_rtc.isrunning() || _rtc.now() < DateTime(F(__DATE__), F(__TIME__)))) {
+        _rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
     }
     
-    LOGMSG(APP_LOG_INFO, "Normal boot detected.");
+    // 2. Call the base class's setup engine
+    BaseNtpClockApp::setup();
     
-    _fsmManager = std::make_unique<ClockFsmManager>(*this);
-    _sceneManager = std::make_unique<SceneManager>(*this);
+    // 3. Initialize application-specific managers
     _weatherManager = std::make_unique<WeatherDataManager>(*this);
-    _fsmManager->setup();
-    _sceneManager->setup(scenePlaylist, numScenes); 
+    if (_sceneManager) {
+        _sceneManager->setup(scenePlaylist, numScenes);
+    }
       
-    LOGMSG(APP_LOG_INFO, "--- APP SETUP COMPLETE ---");
+    LOGINF("--- APP SETUP COMPLETE ---");
 }
 
 void BubbleLedClockApp::loop() {
-    _weatherManager->update();
-    _fsmManager->update();
-    _sceneManager->update();
-    _displayManager.update();
+    // 1. Call the base class's loop engine
+    BaseNtpClockApp::loop();
+
+    // 2. Call the update loops for any application-specific managers
+    if (_weatherManager) _weatherManager->update();
 }
 
-void BubbleLedClockApp::activateAccessPoint() {
-    _apManager->setup(getAppName());
+// --- IGenericClock Interface Implementations ---
 
+void BubbleLedClockApp::activateAccessPoint() {
+    _apManager.setup(getAppName());
     String waitingMsgStr = "AP MODE -- CONNECT TO ";
     waitingMsgStr += getAppName();
-    
-    // This single call handles the entire blocking loop and display logic.
-    _apManager->runBlockingLoop(getClock(), waitingMsgStr.c_str(), "CONNECTED -- SETUP...");
+    _apManager.runBlockingLoop(getClock(), waitingMsgStr.c_str(), "CONNECTED -- SETUP...");
 }
 
 float BubbleLedClockApp::getTempData() { 
     return _currentWeatherData.isValid ? _currentWeatherData.temperatureF : UNSET_VALUE;
 }
+
 float BubbleLedClockApp::getHumidityData() { 
     return _currentWeatherData.isValid ? _currentWeatherData.humidity : UNSET_VALUE;
+}
+
+bool BubbleLedClockApp::isOkToRunScenes() const {
+    return _fsmManager && _fsmManager->isInState("RUNNING_NORMAL");
 }
 
 void BubbleLedClockApp::formatTime(char *txt, unsigned txt_size, const char *format, time_t now) {
@@ -122,19 +98,13 @@ void BubbleLedClockApp::formatTime(char *txt, unsigned txt_size, const char *for
 
 void BubbleLedClockApp::syncRtcFromNtp() {
     if (!_rtcActive) {
-        return; // Don't do anything if there's no RTC
+        return;
     }
-    
-    // Get the current system time (which is now synced to NTP and is in UTC)
     time_t now_utc = time(nullptr);
-    
-    // Adjust the hardware RTC to this new UTC time
     _rtc.adjust(DateTime(now_utc));
-    
     LOGINF("RTC synchronized with NTP time.");
 }
 
 const char* BubbleLedClockApp::getAppName() const {
     return AP_HOST_NAME;
 }
-

@@ -1,8 +1,9 @@
 #include "blc_weather_manager.h"
+#include "i_weather_clock.h"
 #include "blc_app.h"
 #include "debug.h"
 
-WeatherDataManager::WeatherDataManager(BubbleLedClockApp& app) : 
+WeatherDataManager::WeatherDataManager(IWeatherClock& app) : 
     _app(app), _lastWeatherFetchTime(0) {}
 
 void WeatherDataManager::update() {

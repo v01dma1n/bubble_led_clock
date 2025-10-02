@@ -1,4 +1,5 @@
 .gitignore
+*.code-workspace
 3d.local/
 fsm/
 photos.local/
